@@ -1,0 +1,48 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"POT-Creation-Date: 2023-09-14 18:14+0200\n"
+"PO-Revision-Date: 2023-09-14 18:17+0200\n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Language: fr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: Poedit 3.3.2\n"
+"X-Poedit-Basepath: ../../..\n"
+"X-Poedit-SearchPath-0: GUI.py\n"
+
+#: GUI.py:129
+msgid "select_field_to_use"
+msgstr "Sélectionnez le champs à utiliser."
+
+#: GUI.py:134
+msgid "select_translation_language_dialog"
+msgstr "Choisissez la langue pour la traduction de l'exemple."
+
+#: GUI.py:150 GUI.py:166
+msgid "example_not_found"
+msgstr "Aucun exemple trouvé."
+
+#: GUI.py:178
+msgid "select_sentence_dialog"
+msgstr "Choisissez l'exemple à ajouter."
+
+#: GUI.py:183
+msgid "no_example_selected"
+msgstr "Aucun exemple sélectionné."
+
+#: GUI.py:202
+#, python-brace-format
+msgid "{DST_FIELD_JAP}_field_not_found"
+msgstr "Champs {DST_FIELD_JAP} non trouvé dans la note en cours d'édition."
+
+#: GUI.py:208
+#, python-brace-format
+msgid "{DST_FIELD_TRANSLATION}_field_not_found"
+msgstr "Champs {DST_FIELD_TRANSLATION} non trouvé dans la note en cours d'édition."
+
+#: GUI.py:231
+msgid "add_example_manually_tip"
+msgstr "Ajouter un exemple manuellement"
