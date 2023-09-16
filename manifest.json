@@ -1,0 +1,15 @@
+{
+    "name": "Japanese example sentences",
+    "description": "This addon adds example sentences to Japanese vocabulary cards.",
+    "version": "1.0",
+    "author": "@kthys",
+    "minAnkiVersion": "2.1.0",
+    "files": [
+        "__init__.py",
+        "japanese_examples.py",
+        "GUI.py",
+        "config.json",
+        "config.md",
+        "editor_icon_manual.png"
+    ]
+}
