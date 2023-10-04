@@ -18,7 +18,7 @@ Japanese Examples is a plugin for the Anki flashcard software that adds example 
 ## Usage
 
 1. Open the plugin's configuration in the addon manager and define the names of the fields used for examples.
-2. Open Anki and create a new deck or open an existing one.
+2. Restart Anki and create a new deck or open an existing one.
 3. Click on the "Add an example sentence manually" button in the editor's buttons and follow the instructions.
 
 ## License
