@@ -10,7 +10,7 @@ Japanese Examples is a plugin for the Anki flashcard software that adds example 
 
 ## Installation
 
-1. Download the latest version of the plugin from the [releases page](https://github.com/kthys/repo/anki-japanese-examples).
+1. Download the latest version of the plugin from the [releases page](https://github.com/kthys/anki-japanese-examples/releases).
 2. Open Anki and go to Tools > Add-ons > Install Add-on from File.
 3. Select the downloaded file and click Open.
 4. Restart Anki to complete the installation.
