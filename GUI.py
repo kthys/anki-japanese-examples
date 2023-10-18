@@ -154,7 +154,11 @@ def add_example_manually_dialog(editor):
             return None
         
         else:
-            examples = [f"{example['jp_sentence']}\n{example['tr_sentence']}" for example in examples_sentences]
+            try:
+                examples = [f"{example['jp_sentence']}\n{example['tr_sentence']}" for example in examples_sentences]
+            except TypeError:
+                showInfo(_('example_not_found_check_encoding'))
+                return None
 
     # Retrieve examples in french
     elif source_index == 1:
@@ -170,7 +174,11 @@ def add_example_manually_dialog(editor):
             return None
         
         else:
-            examples = [f"{example['jp_sentence']}\n{example['tr_sentence']}" for example in examples_sentences]
+            try:
+                examples = [f"{example['jp_sentence']}\n{example['tr_sentence']}" for example in examples_sentences]
+            except TypeError:
+                showInfo(_('example_not_found_check_encoding'))
+                return None
     
     # User choses which example to add   
     example_picker_index = create_custom_dialog(
