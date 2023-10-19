@@ -219,8 +219,9 @@ def add_example_manually_dialog(editor):
         note.fields[jp_field_index] = jp_sentence
         note.fields[en_field_index]= tr_sentence
 
-        # Save the changes to the note
-        note.flush()
+        # Save the changes to the note if the note already exists
+        if note.id is not None :
+            note.flush()
 
         # Update the editor to show the changes
         editor.loadNote()
