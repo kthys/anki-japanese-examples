@@ -56,11 +56,9 @@ def create_custom_dialog(message, choices, start_row=0):
     # initialize a new dialog
     dialog = QDialog(parent_window)
 
-    # set window modality based on the QT version
-    if get_qt_version() == 6:
-        dialog.setWindowModality(Qt.WindowModality.WindowModal)
-    else:
-        dialog.setWindowModality(Qt.WindowModality.WindowModal)
+    # set window modality to WindowModal
+    dialog.setWindowModality(Qt.WindowModality.WindowModal)
+
 
     # create and set a layout for the dialog
     layout = QVBoxLayout()
@@ -76,12 +74,8 @@ def create_custom_dialog(message, choices, start_row=0):
     selection_list.setCurrentRow(start_row)
     layout.addWidget(selection_list)
 
-    # set the standard buttons based on the QT version
-    if get_qt_version() == 6:
-        standard_buttons = QDialogButtonBox.StandardButton.Ok | \
-                           QDialogButtonBox.StandardButton.Cancel
-    else:
-        standard_buttons = QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+    # set the standard buttons
+    standard_buttons = QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
 
     # create a button box with the standard buttons
     button_box = QDialogButtonBox(standard_buttons)
@@ -90,10 +84,7 @@ def create_custom_dialog(message, choices, start_row=0):
     layout.addWidget(button_box)
 
     # execute the dialog and get the result
-    if get_qt_version() == 6:
-        result = dialog.exec()  # 1 if Ok, 0 if Cancel or window closed
-    else:
-        result = dialog.exec()  # 1 if Ok, 0 if Cancel or window closed
+    result = dialog.exec()  # 1 if Ok, 0 if Cancel or window closed
 
     # return None if the result is 0 (Cancel or window closed)
     if result == 0:
