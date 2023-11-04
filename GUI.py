@@ -211,7 +211,7 @@ def add_example_manually_dialog(editor):
         note.fields[en_field_index]= tr_sentence
 
         # Save the changes to the note if the note already exists
-        if note.id is not None :
+        if note.id != 0:
             note.flush()
 
         # Update the editor to show the changes
