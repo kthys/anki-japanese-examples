@@ -1,6 +1,7 @@
 # Japanese Examples
 
 Japanese Examples is a plugin for the Anki flashcard software that adds example sentences to flashcards from the Tatoeba API.
+![Usage example](https://github.com/kthys/anki-japanese-examples/assets/32138080/7f7e758b-48da-4c33-916a-8614f46c7c68)
 
 ## Features
 
