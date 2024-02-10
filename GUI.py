@@ -1,7 +1,7 @@
 from aqt import gui_hooks, mw
 from aqt.utils import Qt, QDialog, QVBoxLayout, QLabel, QListWidget, QDialogButtonBox
 from aqt.utils import showInfo
-import os, gettext
+import os, gettext, shutil
 from .japanese_examples import find_japanese_sentence, DST_FIELD_TRANSLATION, DST_FIELD_JAP
 
 def get_qt_version():
@@ -97,6 +97,17 @@ def setup_i18n():
     # Set up the translation system
     lang = get_current_language()
     localedir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'locale')
+    current_package_name = __name__.split('.')[0]
+
+    # List all files in the locale directory
+    for root, _, files in os.walk(localedir):
+        for file in files:
+            # If the file doesn't already match the package name, rename it
+            if not file.startswith(current_package_name):
+                old_file_path = os.path.join(root, file)
+                new_file_path = os.path.join(root, current_package_name + os.path.splitext(file)[1])
+                shutil.move(old_file_path, new_file_path)
+
     try:
         translation = gettext.translation(__name__.split('.')[0], localedir, languages=[lang], fallback=True)
         if type(translation) is gettext.NullTranslations:
@@ -211,7 +222,7 @@ def add_example_manually_dialog(editor):
         note.fields[en_field_index]= tr_sentence
 
         # Save the changes to the note if the note already exists
-        if note.id != 0:
+        if note.id != 0 :
             note.flush()
 
         # Update the editor to show the changes
