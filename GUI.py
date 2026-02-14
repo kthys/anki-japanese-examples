@@ -107,10 +107,11 @@ def create_custom_dialog(message, choices, start_row=0, parent=None):
     return selection_list.currentRow()
 
 def setup_i18n():
+    global _
     # Set up the translation system
     lang = get_current_language()
     localedir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'locale')
-    current_package_name = __name__.split('.')[0]
+    current_package_name = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
 
     # List all files in the locale directory
     for root, _, files in os.walk(localedir):
@@ -125,16 +126,13 @@ def setup_i18n():
                     pass
 
     try:
-        translation = gettext.translation(__name__.split('.')[0], localedir, languages=[lang], fallback=True)
+        translation = gettext.translation(current_package_name, localedir, languages=[lang], fallback=True)
         if isinstance(translation, gettext.NullTranslations):
-            translation = gettext.translation(__name__.split('.')[0], localedir, languages=['en_US'], fallback=True)
-            translation.install()
-        else:
-            translation.install()
-
+            translation = gettext.translation(current_package_name, localedir, languages=['en_US'], fallback=True)
     except FileNotFoundError:
-        translation = gettext.translation(__name__.split('.')[0], localedir, languages=['en_US'], fallback=True)
-        translation.install()
+        translation = gettext.translation(current_package_name, localedir, languages=['en_US'], fallback=True)
+
+    _ = translation.gettext
 
 
 def add_example_manually_dialog(editor):
