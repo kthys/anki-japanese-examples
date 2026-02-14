@@ -112,36 +112,17 @@ def setup_i18n():
     localedir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'locale')
     current_package_name = __name__.split('.')[0]
 
-    # Optimization: Check if renaming is necessary by using a sentinel file
-    sentinel_path = os.path.join(localedir, ".last_package_name")
-    needs_renaming = True
-    if os.path.exists(sentinel_path):
-        try:
-            with open(sentinel_path, "r", encoding="utf-8") as f:
-                if f.read().strip() == current_package_name:
-                    needs_renaming = False
-        except Exception:
-            pass
-
-    if needs_renaming:
-        # List all files in the locale directory
-        for root, _, files in os.walk(localedir):
-            for file in files:
-                # If the file doesn't already match the package name and it's a translation file, rename it
-                if not file.startswith(current_package_name) and file.endswith(('.mo', '.po')):
-                    old_file_path = os.path.join(root, file)
-                    new_file_path = os.path.join(root, current_package_name + os.path.splitext(file)[1])
-                    try:
-                        shutil.move(old_file_path, new_file_path)
-                    except Exception:
-                        pass
-
-        # Update or create the sentinel file
-        try:
-            with open(sentinel_path, "w", encoding="utf-8") as f:
-                f.write(current_package_name)
-        except Exception:
-            pass
+    # List all files in the locale directory
+    for root, _, files in os.walk(localedir):
+        for file in files:
+            # If the file doesn't already match the package name and it's a translation file, rename it
+            if not file.startswith(current_package_name) and file.endswith(('.mo', '.po')):
+                old_file_path = os.path.join(root, file)
+                new_file_path = os.path.join(root, current_package_name + os.path.splitext(file)[1])
+                try:
+                    shutil.move(old_file_path, new_file_path)
+                except Exception:
+                    pass
 
     try:
         translation = gettext.translation(__name__.split('.')[0], localedir, languages=[lang], fallback=True)
