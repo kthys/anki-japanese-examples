@@ -44,6 +44,22 @@ class TestGUIAsync(unittest.TestCase):
         self.mock_japanese_examples.DST_FIELD_TRANSLATION = 'Meaning'
         sys.modules['japanese_examples'] = self.mock_japanese_examples
 
+        # Mock setup_i18n related functions to prevent file system changes
+        self.os_walk_patcher = patch('os.walk')
+        self.mock_os_walk = self.os_walk_patcher.start()
+        self.mock_os_walk.return_value = [] # Yield nothing
+
+        self.shutil_move_patcher = patch('shutil.move')
+        self.mock_shutil_move = self.shutil_move_patcher.start()
+
+        self.gettext_patcher = patch('gettext.translation')
+        self.mock_gettext_translation = self.gettext_patcher.start()
+
+        # Mock translation object
+        self.mock_trans = MagicMock()
+        self.mock_trans.gettext.side_effect = lambda x: x # Identity translation
+        self.mock_gettext_translation.return_value = self.mock_trans
+
         # Import the module under test
         if 'GUI' in sys.modules:
             del sys.modules['GUI']
@@ -51,6 +67,9 @@ class TestGUIAsync(unittest.TestCase):
         self.GUI = GUI
 
     def tearDown(self):
+        self.os_walk_patcher.stop()
+        self.shutil_move_patcher.stop()
+        self.gettext_patcher.stop()
         self.modules_patcher.stop()
         if 'GUI' in sys.modules:
             del sys.modules['GUI']
@@ -103,9 +122,7 @@ class TestGUIAsync(unittest.TestCase):
         self.GUI.add_example_manually_dialog(editor)
 
         # Verify initial dialog (Language selection)
-        # Access _ from builtins
-        import builtins
-        _ = getattr(builtins, '_', lambda x: x)
+        _ = self.GUI._
 
         mock_create_custom_dialog.assert_any_call(
             _("select_translation_language_dialog"),
