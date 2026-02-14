@@ -2,7 +2,17 @@ from aqt import gui_hooks, mw
 from aqt.utils import Qt, QDialog, QVBoxLayout, QLabel, QListWidget, QDialogButtonBox
 from aqt.utils import showInfo
 import os, gettext, shutil
-from .japanese_examples import find_japanese_sentence, DST_FIELD_TRANSLATION, DST_FIELD_JAP
+
+try:
+    from .japanese_examples import find_japanese_sentence, DST_FIELD_TRANSLATION, DST_FIELD_JAP
+except ImportError:
+    from japanese_examples import find_japanese_sentence, DST_FIELD_TRANSLATION, DST_FIELD_JAP
+
+# Try to import QueryOp for background operations (Anki 2.1.50+)
+try:
+    from aqt.operations import QueryOp
+except ImportError:
+    QueryOp = None
 
 def get_qt_version():
     """ Return the version of Qt used by Anki.
@@ -164,91 +174,89 @@ def add_example_manually_dialog(editor):
     
     japanese_word = editor.note.fields[editor.web.editor.currentField]
 
-    # Retrieve examples in english
+    # Determine target language code
     if source_index == 0:
-
-        examples_sentences = find_japanese_sentence(japanese_word, 'eng')
-
-        if examples_sentences is None:
-            showInfo(_('example_not_found'))
-            return None
-        
-        elif isinstance(examples_sentences, str):
-            showInfo(examples_sentences)
-            return None
-        
-        else:
-            try:
-                examples = [f"{example['jp_sentence']}\n{example['tr_sentence']}" for example in examples_sentences]
-            except TypeError:
-                showInfo(_('example_not_found_check_encoding'))
-                return None
-
-    # Retrieve examples in french
+        target_lang = 'eng'
     elif source_index == 1:
+        target_lang = 'fra'
+    else:
+        # Should not happen given the dialog choices
+        return
 
-        examples_sentences = find_japanese_sentence(japanese_word, 'fra')
-
+    def on_success(examples_sentences):
         if examples_sentences is None:
             showInfo(_('example_not_found'))
-            return None
+            return
         
         elif isinstance(examples_sentences, str):
             showInfo(examples_sentences)
-            return None
+            return
         
         else:
             try:
                 examples = [f"{example['jp_sentence']}\n{example['tr_sentence']}" for example in examples_sentences]
             except TypeError:
                 showInfo(_('example_not_found_check_encoding'))
-                return None
-    
-    # User choses which example to add   
-    example_picker_index = create_custom_dialog(
-    _('select_sentence_dialog'), 
-    examples
-    )
+                return
 
-    if example_picker_index is None:
-        return showInfo(_('no_example_selected'))
-    
-    else:
-        chosen_example = examples_sentences[example_picker_index]
-        jp_sentence = chosen_example['jp_sentence']
-        tr_sentence = chosen_example['tr_sentence']
+        # User choses which example to add
+        example_picker_index = create_custom_dialog(
+        _('select_sentence_dialog'),
+        examples
+        )
 
-        # Get the current note opened in the editor
-        note = editor.note
-
-        # Get the field names
-        note_type = note.note_type()
-        fields = note_type['flds']
-        field_names = [field['name'] for field in fields]
-
-        # Find the index of the target fields, according to the ones defined in the config file
-        try:
-            jp_field_index = field_names.index(DST_FIELD_JAP)
-        except ValueError:
-            showInfo(_("{DST_FIELD_JAP}_field_not_found").format(DST_FIELD_JAP=DST_FIELD_JAP))
-            return
+        if example_picker_index is None:
+            return showInfo(_('no_example_selected'))
         
-        try:
-            en_field_index = field_names.index(DST_FIELD_TRANSLATION)
-        except ValueError:
-            showInfo(_("{DST_FIELD_TRANSLATION}_field_not_found").format(DST_FIELD_TRANSLATION=DST_FIELD_TRANSLATION))
-            return
+        else:
+            chosen_example = examples_sentences[example_picker_index]
+            jp_sentence = chosen_example['jp_sentence']
+            tr_sentence = chosen_example['tr_sentence']
 
-        # Set the value of the field
-        note.fields[jp_field_index] = jp_sentence
-        note.fields[en_field_index]= tr_sentence
+            # Get the current note opened in the editor
+            note = editor.note
 
-        # Save the changes to the note if the note already exists
-        if note.id != 0 :
-            note.flush()
+            # Get the field names
+            note_type = note.note_type()
+            fields = note_type['flds']
+            field_names = [field['name'] for field in fields]
 
-        # Update the editor to show the changes
-        editor.loadNote()
+            # Find the index of the target fields, according to the ones defined in the config file
+            try:
+                jp_field_index = field_names.index(DST_FIELD_JAP)
+            except ValueError:
+                showInfo(_("{DST_FIELD_JAP}_field_not_found").format(DST_FIELD_JAP=DST_FIELD_JAP))
+                return
+
+            try:
+                en_field_index = field_names.index(DST_FIELD_TRANSLATION)
+            except ValueError:
+                showInfo(_("{DST_FIELD_TRANSLATION}_field_not_found").format(DST_FIELD_TRANSLATION=DST_FIELD_TRANSLATION))
+                return
+
+            # Set the value of the field
+            note.fields[jp_field_index] = jp_sentence
+            note.fields[en_field_index]= tr_sentence
+
+            # Save the changes to the note if the note already exists
+            if note.id != 0 :
+                note.flush()
+
+            # Update the editor to show the changes
+            editor.loadNote()
+
+    # Use QueryOp if available (Anki 2.1.50+), otherwise fall back to blocking call
+    if QueryOp:
+        op = QueryOp(
+            parent=mw,
+            op=lambda col: find_japanese_sentence(japanese_word, target_lang),
+            success=on_success
+        )
+        op.with_progress(_("Searching...")).run_in_background()
+    else:
+        # Fallback for older versions: blocking call
+        examples_sentences = find_japanese_sentence(japanese_word, target_lang)
+        on_success(examples_sentences)
 
 def add_examples_buttons(buttons, editor):
     """ Add buttons to editor menu.
