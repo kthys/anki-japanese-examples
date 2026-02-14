@@ -110,7 +110,7 @@ def setup_i18n():
 
     try:
         translation = gettext.translation(__name__.split('.')[0], localedir, languages=[lang], fallback=True)
-        if type(translation) is gettext.NullTranslations:
+        if isinstance(translation, gettext.NullTranslations):
             translation = gettext.translation(__name__.split('.')[0], localedir, languages=['en_US'], fallback=True)
             translation.install()
         else:
