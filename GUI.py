@@ -151,7 +151,7 @@ def add_example_manually_dialog(editor):
             showInfo(_('example_not_found'))
             return None
         
-        elif examples_sentences is str:
+        elif isinstance(examples_sentences, str):
             showInfo(examples_sentences)
             return None
         
@@ -171,7 +171,7 @@ def add_example_manually_dialog(editor):
             showInfo(_('example_not_found'))
             return None
         
-        elif examples_sentences is str:
+        elif isinstance(examples_sentences, str):
             showInfo(examples_sentences)
             return None
         

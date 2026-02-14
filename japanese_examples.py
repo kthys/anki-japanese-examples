@@ -32,7 +32,10 @@ def find_japanese_sentence(word, translation_language='eng'):
         "to": translation_language
     }
     # Send a GET request to the Tatoeba API.
-    response = requests.get(url, params=params)
+    try:
+        response = requests.get(url, params=params, timeout=10)
+    except requests.exceptions.RequestException:
+        return "Error: Unable to connect to Tatoeba API."
 
     # Check if the response status code is 200 (OK).
     if response.status_code == 200:
