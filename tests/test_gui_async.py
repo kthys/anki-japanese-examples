@@ -103,9 +103,7 @@ class TestGUIAsync(unittest.TestCase):
         self.GUI.add_example_manually_dialog(editor)
 
         # Verify initial dialog (Language selection)
-        # Access _ from builtins
-        import builtins
-        _ = getattr(builtins, '_', lambda x: x)
+        _ = self.GUI._
 
         mock_create_custom_dialog.assert_any_call(
             _("select_translation_language_dialog"),
@@ -132,7 +130,8 @@ class TestGUIAsync(unittest.TestCase):
         # Verify second dialog (Example selection)
         mock_create_custom_dialog.assert_called_with(
             _('select_sentence_dialog'),
-            ['JP1\nTR1']
+            ['JP1\nTR1'],
+            parent=editor.parentWindow
         )
 
         # Verify note update

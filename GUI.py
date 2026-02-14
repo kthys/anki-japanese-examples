@@ -1,7 +1,7 @@
 from aqt import gui_hooks, mw
 from aqt.utils import Qt, QDialog, QVBoxLayout, QLabel, QListWidget, QDialogButtonBox
 from aqt.utils import showInfo
-import os, gettext, shutil
+import os, json
 
 try:
     from .japanese_examples import find_japanese_sentence, DST_FIELD_TRANSLATION, DST_FIELD_JAP
@@ -50,9 +50,10 @@ def get_plugin_dir_path():
 
     return plugin_dir_path
 
-def get_current_language():
-    language = mw.pm.meta.get('defaultLang', 'en')
-    return language
+try:
+    from .i18n import _
+except ImportError:
+    from i18n import _
 
 def create_custom_dialog(message, choices, start_row=0, parent=None):
     """ This function creates a custom dialog with a selection list
@@ -106,54 +107,6 @@ def create_custom_dialog(message, choices, start_row=0, parent=None):
     # return the current row of the selection list
     return selection_list.currentRow()
 
-def setup_i18n():
-    # Set up the translation system
-    lang = get_current_language()
-    localedir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'locale')
-    current_package_name = __name__.split('.')[0]
-
-    # Optimization: Check if renaming is necessary by using a sentinel file
-    sentinel_path = os.path.join(localedir, ".last_package_name")
-    needs_renaming = True
-    if os.path.exists(sentinel_path):
-        try:
-            with open(sentinel_path, "r", encoding="utf-8") as f:
-                if f.read().strip() == current_package_name:
-                    needs_renaming = False
-        except Exception:
-            pass
-
-    if needs_renaming:
-        # List all files in the locale directory
-        for root, _, files in os.walk(localedir):
-            for file in files:
-                # If the file doesn't already match the package name and it's a translation file, rename it
-                if not file.startswith(current_package_name) and file.endswith(('.mo', '.po')):
-                    old_file_path = os.path.join(root, file)
-                    new_file_path = os.path.join(root, current_package_name + os.path.splitext(file)[1])
-                    try:
-                        shutil.move(old_file_path, new_file_path)
-                    except Exception:
-                        pass
-
-        # Update or create the sentinel file
-        try:
-            with open(sentinel_path, "w", encoding="utf-8") as f:
-                f.write(current_package_name)
-        except Exception:
-            pass
-
-    try:
-        translation = gettext.translation(__name__.split('.')[0], localedir, languages=[lang], fallback=True)
-        if isinstance(translation, gettext.NullTranslations):
-            translation = gettext.translation(__name__.split('.')[0], localedir, languages=['en_US'], fallback=True)
-            translation.install()
-        else:
-            translation.install()
-
-    except FileNotFoundError:
-        translation = gettext.translation(__name__.split('.')[0], localedir, languages=['en_US'], fallback=True)
-        translation.install()
 
 
 def add_example_manually_dialog(editor):
@@ -281,4 +234,3 @@ def add_examples_buttons(buttons, editor):
 # Link buttons to Anki
 gui_hooks.editor_did_init_buttons.append(add_examples_buttons)
 
-setup_i18n()
