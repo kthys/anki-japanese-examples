@@ -132,7 +132,8 @@ class TestGUIAsync(unittest.TestCase):
         # Verify second dialog (Example selection)
         mock_create_custom_dialog.assert_called_with(
             _('select_sentence_dialog'),
-            ['JP1\nTR1']
+            ['JP1\nTR1'],
+            parent=editor.parentWindow
         )
 
         # Verify note update
