@@ -5,7 +5,6 @@ from aqt import mw
 #  Fetch config
 config = mw.addonManager.getConfig(__name__)
 
-#SOURCE_FIELDS = config["srcField"]
 DST_FIELD_JAP = config["japaneseDstField"]
 DST_FIELD_TRANSLATION = config["translationDstField"]
 
