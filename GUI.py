@@ -54,14 +54,17 @@ def get_current_language():
     language = mw.pm.meta.get('defaultLang', 'en')
     return language
 
-def create_custom_dialog(message, choices, start_row=0):
+def create_custom_dialog(message, choices, start_row=0, parent=None):
     """ This function creates a custom dialog with a selection list
         and OK/Cancel buttons. It is based on code from Anki
         open-source project.
     """
 
-    # get the active window of the application
-    parent_window = mw.app.activeWindow()
+    # get the active window of the application if no parent is provided
+    if parent is None:
+        parent_window = mw.app.activeWindow()
+    else:
+        parent_window = parent
 
     # initialize a new dialog
     dialog = QDialog(parent_window)
@@ -200,9 +203,11 @@ def add_example_manually_dialog(editor):
                 return
 
         # User choses which example to add
+        # We pass the parent window explicitly to avoid attaching to the progress dialog
         example_picker_index = create_custom_dialog(
         _('select_sentence_dialog'),
-        examples
+        examples,
+        parent=editor.parentWindow
         )
 
         if example_picker_index is None:
