@@ -110,7 +110,7 @@ def setup_i18n():
 
     try:
         translation = gettext.translation(__name__.split('.')[0], localedir, languages=[lang], fallback=True)
-        if type(translation) is gettext.NullTranslations:
+        if isinstance(translation, gettext.NullTranslations):
             translation = gettext.translation(__name__.split('.')[0], localedir, languages=['en_US'], fallback=True)
             translation.install()
         else:
@@ -151,7 +151,7 @@ def add_example_manually_dialog(editor):
             showInfo(_('example_not_found'))
             return None
         
-        elif examples_sentences is str:
+        elif isinstance(examples_sentences, str):
             showInfo(examples_sentences)
             return None
         
@@ -171,7 +171,7 @@ def add_example_manually_dialog(editor):
             showInfo(_('example_not_found'))
             return None
         
-        elif examples_sentences is str:
+        elif isinstance(examples_sentences, str):
             showInfo(examples_sentences)
             return None
         
