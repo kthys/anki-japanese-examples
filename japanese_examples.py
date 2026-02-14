@@ -25,9 +25,14 @@ def find_japanese_sentence(word, translation_language='eng'):
     - If there is an error connecting to the Tatoeba API, returns an error message.
     """
     # Construct the URL for the Tatoeba API search.
-    url = f"https://tatoeba.org/en/api_v0/search?query=%3D{word}&from=jpn&to={translation_language}"
+    url = "https://tatoeba.org/en/api_v0/search"
+    params = {
+        "query": f"={word}",
+        "from": "jpn",
+        "to": translation_language
+    }
     # Send a GET request to the Tatoeba API.
-    response = requests.get(url)
+    response = requests.get(url, params=params)
 
     # Check if the response status code is 200 (OK).
     if response.status_code == 200:
