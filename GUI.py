@@ -1,7 +1,7 @@
 from aqt import gui_hooks, mw
 from aqt.utils import Qt, QDialog, QVBoxLayout, QLabel, QListWidget, QDialogButtonBox
 from aqt.utils import showInfo
-import os, gettext, shutil
+import os, json
 
 try:
     from .japanese_examples import find_japanese_sentence, DST_FIELD_TRANSLATION, DST_FIELD_JAP
@@ -106,33 +106,39 @@ def create_custom_dialog(message, choices, start_row=0, parent=None):
     # return the current row of the selection list
     return selection_list.currentRow()
 
-def setup_i18n():
-    global _
-    # Set up the translation system
-    lang = get_current_language()
-    localedir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'locale')
-    current_package_name = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
+class SimpleTranslator:
+    def __init__(self, lang_code):
+        self.lang_code = lang_code
+        self.translations = {}
+        self.load_translations()
 
-    # List all files in the locale directory
-    for root, _, files in os.walk(localedir):
-        for file in files:
-            # If the file doesn't already match the package name and it's a translation file, rename it
-            if not file.startswith(current_package_name) and file.endswith(('.mo', '.po')):
-                old_file_path = os.path.join(root, file)
-                new_file_path = os.path.join(root, current_package_name + os.path.splitext(file)[1])
-                try:
-                    shutil.move(old_file_path, new_file_path)
-                except Exception:
-                    pass
+    def load_translations(self):
+        locale_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'locale')
 
-    try:
-        translation = gettext.translation(current_package_name, localedir, languages=[lang], fallback=True)
-        if isinstance(translation, gettext.NullTranslations):
-            translation = gettext.translation(current_package_name, localedir, languages=['en_US'], fallback=True)
-    except FileNotFoundError:
-        translation = gettext.translation(current_package_name, localedir, languages=['en_US'], fallback=True)
+        # Always load English first as base
+        en_path = os.path.join(locale_dir, 'en.json')
+        if os.path.exists(en_path):
+            with open(en_path, 'r', encoding='utf-8') as f:
+                self.translations.update(json.load(f))
 
-    _ = translation.gettext
+        # Determine target language file
+        target_lang = self.lang_code
+        if '_' in target_lang:
+            target_lang = target_lang.split('_')[0]
+
+        if target_lang != 'en':
+            target_path = os.path.join(locale_dir, f"{target_lang}.json")
+            if os.path.exists(target_path):
+                with open(target_path, 'r', encoding='utf-8') as f:
+                    self.translations.update(json.load(f))
+
+    def gettext(self, message):
+        return self.translations.get(message, message)
+
+# Initialize translation
+current_lang = get_current_language()
+translator = SimpleTranslator(current_lang)
+_ = translator.gettext
 
 
 def add_example_manually_dialog(editor):
@@ -260,4 +266,3 @@ def add_examples_buttons(buttons, editor):
 # Link buttons to Anki
 gui_hooks.editor_did_init_buttons.append(add_examples_buttons)
 
-setup_i18n()
