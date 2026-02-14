@@ -1,5 +1,12 @@
 import requests
 from aqt import mw
+try:
+    from .i18n import _
+except ImportError:
+    try:
+        from i18n import _
+    except ImportError:
+        _ = lambda x: x
 
 #############################################
 #  Fetch config
@@ -34,7 +41,7 @@ def find_japanese_sentence(word, translation_language='eng'):
     try:
         response = requests.get(url, params=params, timeout=10)
     except requests.exceptions.RequestException:
-        return "Error: Unable to connect to Tatoeba API."
+        return _("error_tatoeba_connection")
 
     # Check if the response status code is 200 (OK).
     if response.status_code == 200:
@@ -61,8 +68,8 @@ def find_japanese_sentence(word, translation_language='eng'):
             if sentences:
                 return sentences
             else:
-                return f"No Japanese sentence found containing the word '{word}'."
+                return _("no_japanese_sentence_found").format(word=word)
         else:
-            return f"No Japanese sentence found containing the word '{word}'."
+            return _("no_japanese_sentence_found").format(word=word)
     else:
-        return "Error: Unable to connect to Tatoeba API."
+        return _("error_tatoeba_connection")

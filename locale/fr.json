@@ -1,0 +1,13 @@
+{
+    "select_field_to_use": "Sélectionnez le champs à utiliser.",
+    "select_translation_language_dialog": "Choisissez la langue pour la traduction de l'exemple.",
+    "example_not_found": "Aucun exemple trouvé.",
+    "example_not_found_check_encoding": "Aucun exemple trouvé. Il y a peut-être un problème dans l’encodage de votre mot japonais.",
+    "select_sentence_dialog": "Choisissez l'exemple à ajouter.",
+    "no_example_selected": "Aucun exemple sélectionné.",
+    "{DST_FIELD_JAP}_field_not_found": "Champs {DST_FIELD_JAP} non trouvé dans la note en cours d'édition.",
+    "{DST_FIELD_TRANSLATION}_field_not_found": "Champs {DST_FIELD_TRANSLATION} non trouvé dans la note en cours d'édition.",
+    "add_example_manually_tip": "Ajouter un exemple manuellement",
+    "error_tatoeba_connection": "Erreur : Impossible de se connecter à l'API Tatoeba.",
+    "no_japanese_sentence_found": "Aucune phrase japonaise trouvée contenant le mot '{word}'."
+}
