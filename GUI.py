@@ -171,10 +171,12 @@ def add_example_manually_dialog(editor):
 
         # User choses which example to add
         # We pass the parent window explicitly to avoid attaching to the progress dialog
+        # Use None (defaults to active window) or mw to ensure proper Z-ordering and avoid
+        # parenting to a potentially closing/hidden window.
         example_picker_index = create_custom_dialog(
         _('select_sentence_dialog'),
         examples,
-        parent=editor.parentWindow
+        parent=mw # Explicitly use main window as parent
         )
 
         if example_picker_index is None:
