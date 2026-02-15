@@ -1,7 +1,12 @@
 from aqt import gui_hooks, mw
 from aqt.utils import Qt, QDialog, QVBoxLayout, QLabel, QListWidget, QDialogButtonBox
-from aqt.utils import showInfo, tooltip
+from aqt.utils import showInfo
 import os, json
+
+try:
+    from PyQt5.QtCore import QTimer
+except ImportError:
+    from PyQt6.QtCore import QTimer
 
 try:
     from .japanese_examples import find_japanese_sentence, DST_FIELD_TRANSLATION, DST_FIELD_JAP
@@ -169,66 +174,73 @@ def add_example_manually_dialog(editor):
                 showInfo(_('example_not_found_check_encoding'))
                 return
 
-        # User choses which example to add
-        # We pass the parent window explicitly to avoid attaching to the progress dialog
-        # Use editor.parentWindow (Browser/Add window) as parent, ensuring it's not obscured by closing progress dialog
-        example_picker_index = create_custom_dialog(
-        _('select_sentence_dialog'),
-        examples,
-        parent=editor.parentWindow
-        )
+        def show_result_dialog():
+            # User choses which example to add
+            # We pass the parent window explicitly to avoid attaching to the progress dialog
+            # Use editor.parentWindow (Browser/Add window) as parent.
+            # With QTimer delay, the progress dialog should be closed and focus restored.
+            example_picker_index = create_custom_dialog(
+            _('select_sentence_dialog'),
+            examples,
+            parent=editor.parentWindow
+            )
 
-        if example_picker_index is None:
-            return showInfo(_('no_example_selected'))
-
-        else:
-            chosen_example = examples_sentences[example_picker_index]
-            jp_sentence = chosen_example['jp_sentence']
-            tr_sentence = chosen_example['tr_sentence']
-
-            # Get the current note opened in the editor
-            note = editor.note
-
-            # Get the field names
-            note_type = note.note_type()
-            fields = note_type['flds']
-            field_names = [field['name'] for field in fields]
-
-            # Find the index of the target fields, according to the ones defined in the config file
-            try:
-                jp_field_index = field_names.index(DST_FIELD_JAP)
-            except ValueError:
-                showInfo(_("{DST_FIELD_JAP}_field_not_found").format(DST_FIELD_JAP=DST_FIELD_JAP))
+            if example_picker_index is None:
+                showInfo(_('no_example_selected'))
                 return
 
-            try:
-                en_field_index = field_names.index(DST_FIELD_TRANSLATION)
-            except ValueError:
-                showInfo(_("{DST_FIELD_TRANSLATION}_field_not_found").format(DST_FIELD_TRANSLATION=DST_FIELD_TRANSLATION))
-                return
+            else:
+                chosen_example = examples_sentences[example_picker_index]
+                jp_sentence = chosen_example['jp_sentence']
+                tr_sentence = chosen_example['tr_sentence']
 
-            # Set the value of the field
-            note.fields[jp_field_index] = jp_sentence
-            note.fields[en_field_index]= tr_sentence
+                # Get the current note opened in the editor
+                note = editor.note
 
-            # Save the changes to the note if the note already exists
-            if note.id != 0 :
-                note.flush()
+                # Get the field names
+                note_type = note.note_type()
+                fields = note_type['flds']
+                field_names = [field['name'] for field in fields]
 
-            # Update the editor to show the changes
-            editor.loadNote()
+                # Find the index of the target fields, according to the ones defined in the config file
+                try:
+                    jp_field_index = field_names.index(DST_FIELD_JAP)
+                except ValueError:
+                    showInfo(_("{DST_FIELD_JAP}_field_not_found").format(DST_FIELD_JAP=DST_FIELD_JAP))
+                    return
+
+                try:
+                    en_field_index = field_names.index(DST_FIELD_TRANSLATION)
+                except ValueError:
+                    showInfo(_("{DST_FIELD_TRANSLATION}_field_not_found").format(DST_FIELD_TRANSLATION=DST_FIELD_TRANSLATION))
+                    return
+
+                # Set the value of the field
+                note.fields[jp_field_index] = jp_sentence
+                note.fields[en_field_index]= tr_sentence
+
+                # Save the changes to the note if the note already exists
+                if note.id != 0 :
+                    note.flush()
+
+                # Update the editor to show the changes
+                editor.loadNote()
+
+        # Schedule the dialog to open on the next event loop iteration
+        # allowing the progress dialog to close cleanly first.
+        QTimer.singleShot(100, show_result_dialog)
 
     # Use QueryOp if available (Anki 2.1.50+), otherwise fall back to blocking call
     if QueryOp:
+        # Pass editor.parentWindow as parent so the progress dialog attaches to the correct window
+        # (Browser/Add window) instead of the main window. This ensures focus returns correctly when closing.
         op = QueryOp(
-            parent=mw,
+            parent=editor.parentWindow,
             op=lambda col: find_japanese_sentence(japanese_word, target_lang),
             success=on_success
         )
         _active_ops.add(op)
-        # Use tooltip instead of modal progress dialog to avoid window management issues
-        tooltip(_("searching"))
-        op.run_in_background()
+        op.with_progress(_("searching")).run_in_background()
     else:
         # Fallback for older versions: blocking call
         examples_sentences = find_japanese_sentence(japanese_word, target_lang)
