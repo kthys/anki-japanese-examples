@@ -1,7 +1,7 @@
 from aqt import gui_hooks, mw
 from aqt.utils import Qt, QDialog, QVBoxLayout, QLabel, QListWidget, QDialogButtonBox
 from aqt.utils import showInfo
-import os, json
+import os, json, html
 
 try:
     from .japanese_examples import find_japanese_sentence, DST_FIELD_TRANSLATION, DST_FIELD_JAP
@@ -197,8 +197,8 @@ def add_example_manually_dialog(editor):
                 return
 
             # Set the value of the field
-            note.fields[jp_field_index] = jp_sentence
-            note.fields[en_field_index]= tr_sentence
+            note.fields[jp_field_index] = html.escape(jp_sentence)
+            note.fields[en_field_index]= html.escape(tr_sentence)
 
             # Save the changes to the note if the note already exists
             if note.id != 0 :
