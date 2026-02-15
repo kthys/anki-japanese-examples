@@ -141,7 +141,7 @@ class TestGUIAsync(unittest.TestCase):
         self.assertEqual(editor.note.fields[1], 'TR1')
 
         # Verify flush and loadNote
-        editor.note.flush.assert_called_once()
+        self.mock_mw.col.update_note.assert_called_with(editor.note)
         editor.loadNote.assert_called_once()
 
     def test_fallback_when_queryop_missing(self):
