@@ -118,6 +118,12 @@ def add_example_manually_dialog(editor):
         showInfo(_('select_field_to_use'))
         return
 
+    japanese_word = editor.note.fields[editor.web.editor.currentField]
+
+    if not japanese_word or not japanese_word.strip():
+        showInfo(_("no_japanese_sentence_found").format(word=japanese_word))
+        return
+
     # User choses where to get the examples from
     source_index = create_custom_dialog(
     _("select_translation_language_dialog"), 
@@ -128,8 +134,6 @@ def add_example_manually_dialog(editor):
     if source_index is None:
         return None
     
-    japanese_word = editor.note.fields[editor.web.editor.currentField]
-
     # Determine target language code
     if source_index == 0:
         target_lang = 'eng'
@@ -210,7 +214,7 @@ def add_example_manually_dialog(editor):
             op=lambda col: find_japanese_sentence(japanese_word, target_lang),
             success=on_success
         )
-        op.with_progress(_("Searching...")).run_in_background()
+        op.with_progress(_("searching")).run_in_background()
     else:
         # Fallback for older versions: blocking call
         examples_sentences = find_japanese_sentence(japanese_word, target_lang)
