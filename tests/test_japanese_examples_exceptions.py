@@ -21,6 +21,10 @@ class TestJapaneseExamplesExceptions(unittest.TestCase):
         self.mock_requests.exceptions.RequestException = RequestException
         self.mock_requests.exceptions.ConnectionError = ConnectionError
         self.mock_requests.exceptions.Timeout = Timeout
+
+        # Mock Session
+        self.mock_session = MagicMock()
+        self.mock_requests.Session.return_value = self.mock_session
         self.mock_requests.get = MagicMock()
 
         # Patch sys.modules
@@ -46,7 +50,7 @@ class TestJapaneseExamplesExceptions(unittest.TestCase):
         # Configure the mock to raise a RequestException
         # We need to use the exception class from our mock
         RequestException = self.mock_requests.exceptions.RequestException
-        self.mock_requests.get.side_effect = RequestException("Network error")
+        self.mock_session.get.side_effect = RequestException("Network error")
 
         # Call the function
         result = self.japanese_examples.find_japanese_sentence("word", "eng")
@@ -60,17 +64,17 @@ class TestJapaneseExamplesExceptions(unittest.TestCase):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {}
-        self.mock_requests.get.side_effect = None
-        self.mock_requests.get.return_value = mock_response
+        self.mock_session.get.side_effect = None
+        self.mock_session.get.return_value = mock_response
 
         self.japanese_examples.find_japanese_sentence("word", "eng")
 
         # Check if timeout was passed
-        if not self.mock_requests.get.called:
-             self.fail("requests.get was not called")
+        if not self.mock_session.get.called:
+             self.fail("session.get was not called")
 
-        args, kwargs = self.mock_requests.get.call_args
-        self.assertIn('timeout', kwargs, "Timeout parameter missing in requests.get call")
+        args, kwargs = self.mock_session.get.call_args
+        self.assertIn('timeout', kwargs, "Timeout parameter missing in session.get call")
         self.assertEqual(kwargs['timeout'], 10, "Timeout should be 10 seconds")
 
 if __name__ == '__main__':

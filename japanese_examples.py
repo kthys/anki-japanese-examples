@@ -1,6 +1,9 @@
 import requests
 import logging
 from aqt import mw
+
+# Use a global session for connection pooling to improve performance
+_session = requests.Session()
 try:
     from .i18n import _
 except ImportError:
@@ -43,7 +46,7 @@ def find_japanese_sentence(word, translation_language='eng'):
     }
     # Send a GET request to the Tatoeba API.
     try:
-        response = requests.get(url, params=params, timeout=10)
+        response = _session.get(url, params=params, timeout=10)
         response.raise_for_status()
         # Parse the response JSON data.
         data = response.json()

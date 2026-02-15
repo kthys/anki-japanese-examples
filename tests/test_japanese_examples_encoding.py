@@ -11,12 +11,15 @@ sys.modules['aqt'] = MagicMock()
 sys.modules['requests'] = MagicMock()
 
 # Now import the module to test
-from japanese_examples import find_japanese_sentence
+import japanese_examples
+import importlib
 
 class TestJapaneseExamples(unittest.TestCase):
     def setUp(self):
+        # Reload the module to ensure it uses the current mock for requests
+        importlib.reload(japanese_examples)
         # Reset mocks before each test
-        sys.modules['requests'].get.reset_mock()
+        japanese_examples._session.get.reset_mock()
         pass
 
     def test_find_japanese_sentence_encoding(self):
@@ -24,14 +27,14 @@ class TestJapaneseExamples(unittest.TestCase):
         lang = "eng"
 
         # Call the function
-        find_japanese_sentence(word, lang)
+        japanese_examples.find_japanese_sentence(word, lang)
 
         # Get the call arguments
         # If the function was called, call_args should not be None
-        if sys.modules['requests'].get.called:
-            args, kwargs = sys.modules['requests'].get.call_args
+        if japanese_examples._session.get.called:
+            args, kwargs = japanese_examples._session.get.call_args
         else:
-            self.fail("requests.get was not called")
+            self.fail("session.get was not called")
 
         # Assertions
         # The first argument should be the base URL
