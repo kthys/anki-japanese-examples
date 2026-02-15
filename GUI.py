@@ -1,6 +1,6 @@
 from aqt import gui_hooks, mw
 from aqt.utils import Qt, QDialog, QVBoxLayout, QLabel, QListWidget, QDialogButtonBox
-from aqt.qt import QCheckBox, QLineEdit, QPushButton, QFormLayout
+from aqt.qt import QCheckBox, QLineEdit, QPushButton, QFormLayout, QHBoxLayout
 from aqt.utils import showInfo
 import os, html
 
@@ -99,8 +99,16 @@ def create_custom_dialog(message, choices, start_row=0, parent=None, with_checkb
 
     checkbox = None
     if with_checkbox:
+        h_layout = QHBoxLayout()
         checkbox = QCheckBox(checkbox_text)
-        layout.addWidget(checkbox)
+        h_layout.addWidget(checkbox)
+
+        info_label = QLabel("ⓘ")
+        info_label.setToolTip(_("deck_preference_info_tooltip"))
+        h_layout.addWidget(info_label)
+
+        h_layout.addStretch()
+        layout.addLayout(h_layout)
 
     # set the standard buttons
     standard_buttons = QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
