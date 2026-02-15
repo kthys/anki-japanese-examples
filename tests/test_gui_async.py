@@ -37,6 +37,7 @@ class TestGUIAsync(unittest.TestCase):
         # Configure mw
         self.mock_mw.pm.meta.get.return_value = 'en'
         self.mock_mw.col.path = "/path/to/collection.anki2"
+        self.mock_mw.progress.busy.return_value = False
         # Link mw to aqt.mw
         self.mock_aqt.mw = self.mock_mw
 
