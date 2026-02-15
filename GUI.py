@@ -221,7 +221,7 @@ def add_example_manually_dialog(editor):
 
                 # Save the changes to the note if the note already exists
                 if note.id != 0 :
-                    note.flush()
+                    mw.col.update_note(note)
 
                 # Update the editor to show the changes
                 editor.loadNote()
