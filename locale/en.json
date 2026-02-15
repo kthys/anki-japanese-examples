@@ -1,0 +1,14 @@
+{
+    "select_field_to_use": "Please select the field containing the word you want to use as an example.",
+    "select_translation_language_dialog": "Please select your language for the translation.",
+    "example_not_found": "No example found.",
+    "example_not_found_check_encoding": "No example found. There might be something wrong with the encoding of your Japanese word.",
+    "select_sentence_dialog": "Select a sentence to add as an example.",
+    "no_example_selected": "No example selected.",
+    "{DST_FIELD_JAP}_field_not_found": "{DST_FIELD_JAP} field not found in the current note.",
+    "{DST_FIELD_TRANSLATION}_field_not_found": "{DST_FIELD_TRANSLATION} field not found in the current note.",
+    "add_example_manually_tip": "Add an example sentence manually",
+    "error_tatoeba_connection": "Error: Unable to connect to Tatoeba API.",
+    "no_japanese_sentence_found": "No Japanese sentence found containing the word '{word}'.",
+    "searching": "Searching..."
+}
