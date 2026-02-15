@@ -16,6 +16,9 @@ import importlib
 
 class TestJapaneseExamples(unittest.TestCase):
     def setUp(self):
+        # Ensure the module is in sys.modules before reloading
+        if 'japanese_examples' not in sys.modules:
+            sys.modules['japanese_examples'] = japanese_examples
         # Reload the module to ensure it uses the current mock for requests
         importlib.reload(japanese_examples)
         # Reset mocks before each test
@@ -38,8 +41,6 @@ class TestJapaneseExamples(unittest.TestCase):
 
         # Assertions
         # The first argument should be the base URL
-        # Currently (before fix) it is the full URL with query parameters
-        # After fix it should be just the base URL
         self.assertEqual(args[0], "https://tatoeba.org/en/api_v0/search",
                          f"Expected base URL, got {args[0]}")
 
