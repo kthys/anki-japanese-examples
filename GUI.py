@@ -1,7 +1,8 @@
 from aqt import gui_hooks, mw
 from aqt.utils import Qt, QDialog, QVBoxLayout, QLabel, QListWidget, QDialogButtonBox
+from aqt.qt import QCheckBox, QLineEdit, QPushButton, QFormLayout, QHBoxLayout
 from aqt.utils import showInfo
-import os, json, html
+import os, html
 
 try:
     from PyQt5.QtCore import QTimer
@@ -63,7 +64,7 @@ try:
 except ImportError:
     from i18n import _
 
-def create_custom_dialog(message, choices, start_row=0, parent=None):
+def create_custom_dialog(message, choices, start_row=0, parent=None, with_checkbox=False, checkbox_text=""):
     """ This function creates a custom dialog with a selection list
         and OK/Cancel buttons. It is based on code from Anki
         open-source project.
@@ -96,6 +97,19 @@ def create_custom_dialog(message, choices, start_row=0, parent=None):
     selection_list.setCurrentRow(start_row)
     layout.addWidget(selection_list)
 
+    checkbox = None
+    if with_checkbox:
+        h_layout = QHBoxLayout()
+        checkbox = QCheckBox(checkbox_text)
+        h_layout.addWidget(checkbox)
+
+        info_label = QLabel("ⓘ")
+        info_label.setToolTip(_("deck_preference_info_tooltip"))
+        h_layout.addWidget(info_label)
+
+        h_layout.addStretch()
+        layout.addLayout(h_layout)
+
     # set the standard buttons
     standard_buttons = QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
 
@@ -113,9 +127,26 @@ def create_custom_dialog(message, choices, start_row=0, parent=None):
         return None
 
     # return the current row of the selection list
-    return selection_list.currentRow()
+    if with_checkbox:
+        return (selection_list.currentRow(), checkbox.isChecked())
+    else:
+        return selection_list.currentRow()
 
 
+
+def get_current_deck_id(editor):
+    """ Get the deck ID of the current note or selected deck. """
+    # Check if we are in Add Cards dialog
+    if hasattr(editor.parentWindow, 'deckChooser'):
+        return editor.parentWindow.deckChooser.selectedId()
+
+    # Check if we are in Browser
+    if editor.note:
+        cards = editor.note.cards()
+        if cards:
+            return cards[0].did
+
+    return None
 
 def add_example_manually_dialog(editor):
     """ Dialog for adding an example of sentence based on japanese word present in the selected field.
@@ -132,24 +163,47 @@ def add_example_manually_dialog(editor):
         showInfo(_("no_japanese_sentence_found").format(word=japanese_word))
         return
 
-    # User choses where to get the examples from
-    source_index = create_custom_dialog(
-    _("select_translation_language_dialog"), 
-    ['English', 'French']
-    )
+    # Check for deck preferences
+    deck_id = get_current_deck_id(editor)
+    addon_name = __name__.split('.')[0]
+    config = mw.addonManager.getConfig(addon_name) or {}
+    deck_prefs = config.get('deck_preferences', {})
 
+    target_lang = None
+    if deck_id and str(deck_id) in deck_prefs:
+        target_lang = deck_prefs[str(deck_id)]
 
-    if source_index is None:
-        return None
-    
-    # Determine target language code
-    if source_index == 0:
-        target_lang = 'eng'
-    elif source_index == 1:
-        target_lang = 'fra'
-    else:
-        # Should not happen given the dialog choices
-        return
+    if not target_lang:
+        # User choses where to get the examples from
+        result = create_custom_dialog(
+            _("select_translation_language_dialog"),
+            ['English', 'French'],
+            with_checkbox=(deck_id is not None),
+            checkbox_text=_('use_as_default_for_deck')
+        )
+
+        if result is None:
+            return None
+
+        if deck_id is not None:
+             source_index, save_default = result
+        else:
+             source_index = result
+             save_default = False
+
+        # Determine target language code
+        if source_index == 0:
+            target_lang = 'eng'
+        elif source_index == 1:
+            target_lang = 'fra'
+        else:
+            # Should not happen given the dialog choices
+            return
+
+        if save_default and deck_id:
+            deck_prefs[str(deck_id)] = target_lang
+            config['deck_preferences'] = deck_prefs
+            mw.addonManager.writeConfig(addon_name, config)
 
     # Define op variable to be accessible in on_success
     op = None
@@ -217,17 +271,23 @@ def add_example_manually_dialog(editor):
                         fields = note_type['flds']
                         field_names = [field['name'] for field in fields]
 
+                        # Use dynamic config for field names
+                        # Re-read config in case it changed (though usually cached by Anki)
+                        current_config = mw.addonManager.getConfig(addon_name) or {}
+                        dst_field_jap = current_config.get("japaneseDstField", "ExampleJapanese")
+                        dst_field_translation = current_config.get("translationDstField", "ExampleTranslated")
+
                         # Find the index of the target fields, according to the ones defined in the config file
                         try:
-                            jp_field_index = field_names.index(DST_FIELD_JAP)
+                            jp_field_index = field_names.index(dst_field_jap)
                         except ValueError:
-                            showInfo(_("{DST_FIELD_JAP}_field_not_found").format(DST_FIELD_JAP=DST_FIELD_JAP))
+                            showInfo(_("{DST_FIELD_JAP}_field_not_found").format(DST_FIELD_JAP=dst_field_jap))
                             return
 
                         try:
-                            en_field_index = field_names.index(DST_FIELD_TRANSLATION)
+                            en_field_index = field_names.index(dst_field_translation)
                         except ValueError:
-                            showInfo(_("{DST_FIELD_TRANSLATION}_field_not_found").format(DST_FIELD_TRANSLATION=DST_FIELD_TRANSLATION))
+                            showInfo(_("{DST_FIELD_TRANSLATION}_field_not_found").format(DST_FIELD_TRANSLATION=dst_field_translation))
                             return
 
                         # Set the value of the field

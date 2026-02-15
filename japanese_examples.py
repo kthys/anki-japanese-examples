@@ -1,5 +1,9 @@
 import requests
+import logging
 from aqt import mw
+
+# Use a global session for connection pooling to improve performance
+_session = requests.Session()
 try:
     from .i18n import _
 except ImportError:
@@ -9,6 +13,9 @@ except ImportError:
         _ = lambda x: x
 
 #############################################
+#  Logging setup
+logger = logging.getLogger(__name__)
+
 #  Fetch config
 config = mw.addonManager.getConfig(__name__)
 
@@ -39,37 +46,38 @@ def find_japanese_sentence(word, translation_language='eng'):
     }
     # Send a GET request to the Tatoeba API.
     try:
-        response = requests.get(url, params=params, timeout=10)
-    except requests.exceptions.RequestException:
-        return _("error_tatoeba_connection")
-
-    # Check if the response status code is 200 (OK).
-    if response.status_code == 200:
+        response = _session.get(url, params=params, timeout=10)
+        response.raise_for_status()
         # Parse the response JSON data.
         data = response.json()
-        # Check if any results were returned.
-        if data:
-            # Initialize an empty list to store the sentences.
-            sentences = []
-            # Loop through each result and extract the Japanese sentence text.
-            for result in data['results']:
-                # Check if the sentence needs review before adding it to the list.
-                try:
-                    jp_sentence = result['text'] if not result['transcriptions'][0]['needsReview'] else None
-                    tr_sentence = result['translations'][0][0]['text']
-                except IndexError:
-                    jp_sentence = None
-                    tr_sentence = None
-                
-                if jp_sentence and tr_sentence:
-                    sentences.append({'jp_sentence': jp_sentence, 'tr_sentence': tr_sentence})
-
-            # Check if any sentences were found.
-            if sentences:
-                return sentences
-            else:
-                return _("no_japanese_sentence_found").format(word=word)
-        else:
-            return _("no_japanese_sentence_found").format(word=word)
-    else:
+    except (requests.exceptions.RequestException, ValueError):
+        logger.exception("Tatoeba API request failed")
         return _("error_tatoeba_connection")
+
+    # Check if any results were returned.
+    if data and 'results' in data:
+        # Initialize an empty list to store the sentences.
+        sentences = []
+        # Loop through each result and extract the Japanese sentence text.
+        for result in data['results']:
+            # Check if the sentence needs review before adding it to the list.
+            # Use explicit presence checks for better performance and reliability
+            transcriptions = result.get('transcriptions', [])
+            translations = result.get('translations', [])
+
+            jp_sentence = None
+            if transcriptions and not transcriptions[0].get('needsReview'):
+                jp_sentence = result.get('text')
+
+            tr_sentence = None
+            if translations and translations[0]:
+                tr_sentence = translations[0][0].get('text')
+
+            if jp_sentence and tr_sentence:
+                sentences.append({'jp_sentence': jp_sentence, 'tr_sentence': tr_sentence})
+
+        # Check if any sentences were found.
+        if sentences:
+            return sentences
+
+    return _("no_japanese_sentence_found").format(word=word)
