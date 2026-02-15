@@ -15,6 +15,7 @@ class TestGUIUtilities(unittest.TestCase):
         self.mock_operations = MagicMock()
         self.mock_utils = MagicMock()
         self.mock_gui_hooks = MagicMock()
+        self.mock_qt = MagicMock()
 
         # Mock PyQt5
         self.mock_pyqt5 = MagicMock()
@@ -32,7 +33,7 @@ class TestGUIUtilities(unittest.TestCase):
             'aqt.operations': self.mock_operations,
             'aqt.utils': self.mock_utils,
             'aqt.gui_hooks': self.mock_gui_hooks,
-            'aqt.qt': MagicMock(),
+            'aqt.qt': self.mock_qt,
             'PyQt5': self.mock_pyqt5,
             'PyQt5.QtCore': self.mock_pyqt5_qtcore
         })
@@ -93,6 +94,53 @@ class TestGUIUtilities(unittest.TestCase):
 
         result = self.GUI.get_plugin_dir_path()
         self.assertEqual(result, expected_path)
+
+    def test_create_custom_dialog_with_checkbox_adds_tooltip(self):
+        """Test create_custom_dialog adds a tooltip and icon when checkbox is enabled."""
+        # Setup mocks
+        mock_dialog = self.mock_utils.QDialog.return_value
+        mock_dialog.exec.return_value = 1  # OK
+
+        mock_selection_list = self.mock_utils.QListWidget.return_value
+        mock_selection_list.currentRow.return_value = 0
+
+        mock_checkbox = self.mock_qt.QCheckBox.return_value
+        mock_checkbox.isChecked.return_value = True
+
+        # Call function
+        result = self.GUI.create_custom_dialog(
+            "Test Message",
+            ["Choice 1", "Choice 2"],
+            with_checkbox=True,
+            checkbox_text="Save default"
+        )
+
+        # Verify layout structure
+        # Should create QHBoxLayout
+        self.assertTrue(self.mock_qt.QHBoxLayout.called, "QHBoxLayout should be instantiated")
+        mock_h_layout = self.mock_qt.QHBoxLayout.return_value
+
+        # Should create QLabel for info icon
+        # Check if QLabel was called with "ⓘ"
+        # Since QLabel is called multiple times (for message and info icon), check call_args_list
+        calls = self.mock_utils.QLabel.call_args_list
+        info_icon_created = any(call[0][0] == "ⓘ" for call in calls)
+        self.assertTrue(info_icon_created, "Info icon QLabel('ⓘ') should be created")
+
+        # Find the mock for the info label to verify setToolTip
+        # It's tricky because return_value is the same mock object for all calls by default unless side_effect is used.
+        # But we can check if setToolTip was called on the return value of QLabel.
+        mock_label = self.mock_utils.QLabel.return_value
+        mock_label.setToolTip.assert_called()
+
+        # Verify widgets added to HBox
+        # mock_h_layout.addWidget called with checkbox and label
+        self.assertTrue(mock_h_layout.addWidget.called)
+
+        # Verify HBox added to main layout (VBox)
+        # Main layout is created via QVBoxLayout()
+        mock_v_layout = self.mock_utils.QVBoxLayout.return_value
+        mock_v_layout.addLayout.assert_called_with(mock_h_layout)
 
 if __name__ == '__main__':
     unittest.main()
