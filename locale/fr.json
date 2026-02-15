@@ -10,5 +10,11 @@
     "add_example_manually_tip": "Ajouter un exemple manuellement",
     "error_tatoeba_connection": "Erreur : Impossible de se connecter à l'API Tatoeba.",
     "no_japanese_sentence_found": "Aucune phrase japonaise trouvée contenant le mot '{word}'.",
-    "searching": "Recherche..."
+    "searching": "Recherche...",
+    "use_as_default_for_deck": "Utiliser comme langue par défaut pour ce paquet",
+    "reset_deck_preferences": "Réinitialiser les préférences",
+    "settings_dialog_title": "Paramètres de l'addon",
+    "japanese_field_label": "Nom du champ Japonais :",
+    "translation_field_label": "Nom du champ Traduction :",
+    "deck_preferences_reset": "Les préférences de paquet ont été réinitialisées."
 }
