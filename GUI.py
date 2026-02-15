@@ -214,7 +214,7 @@ def add_example_manually_dialog(editor):
             op=lambda col: find_japanese_sentence(japanese_word, target_lang),
             success=on_success
         )
-        op.with_progress(_("Searching...")).run_in_background()
+        op.with_progress(_("searching")).run_in_background()
     else:
         # Fallback for older versions: blocking call
         examples_sentences = find_japanese_sentence(japanese_word, target_lang)
