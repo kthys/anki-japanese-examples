@@ -17,5 +17,5 @@
     "japanese_field_label": "Nom du champ Japonais :",
     "translation_field_label": "Nom du champ Traduction :",
     "deck_preferences_reset": "Les préférences de paquet ont été réinitialisées.",
-    "deck_preference_info_tooltip": "Cette langue sera utilisée comme défaut pour le paquet actuel. Cette préférence peut être réinitialisée dans les paramètres de l'addon."
+    "deck_preference_info_tooltip": "Cette préférence peut être réinitialisée dans les paramètres de l'addon."
 }
