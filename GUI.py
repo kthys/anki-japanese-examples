@@ -1,7 +1,7 @@
 from aqt import gui_hooks, mw
 from aqt.utils import Qt, QDialog, QVBoxLayout, QLabel, QListWidget, QDialogButtonBox
 from aqt.utils import showInfo
-import os, json, html
+import os, html
 
 try:
     from PyQt5.QtCore import QTimer
