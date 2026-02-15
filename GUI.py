@@ -175,6 +175,15 @@ def add_example_manually_dialog(editor):
                 return
 
         def show_result_dialog():
+            # Ensure progress dialog is finished
+            try:
+                if mw.progress.busy():
+                    QTimer.singleShot(100, show_result_dialog)
+                    return
+            except AttributeError:
+                # In case mw.progress is not available (very old versions)
+                pass
+
             # User choses which example to add
             # We pass the parent window explicitly to avoid attaching to the progress dialog
             # Use editor.parentWindow (Browser/Add window) as parent.
@@ -228,7 +237,7 @@ def add_example_manually_dialog(editor):
 
         # Schedule the dialog to open on the next event loop iteration
         # allowing the progress dialog to close cleanly first.
-        QTimer.singleShot(100, show_result_dialog)
+        QTimer.singleShot(200, show_result_dialog)
 
     # Use QueryOp if available (Anki 2.1.50+), otherwise fall back to blocking call
     if QueryOp:
