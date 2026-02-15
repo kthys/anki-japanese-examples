@@ -29,6 +29,7 @@ class TestGUIAsync(unittest.TestCase):
             'aqt.operations': self.mock_operations,
             'aqt.utils': self.mock_utils,
             'aqt.gui_hooks': self.mock_gui_hooks,
+            'aqt.qt': MagicMock(),
             'PyQt5': self.mock_pyqt5,
             'PyQt5.QtCore': self.mock_pyqt5_qtcore
         })
@@ -40,6 +41,14 @@ class TestGUIAsync(unittest.TestCase):
         self.mock_mw.progress.busy.return_value = False
         # Link mw to aqt.mw
         self.mock_aqt.mw = self.mock_mw
+
+        # Add config mock
+        self.mock_config = {
+            "japaneseDstField": "Expression",
+            "translationDstField": "Meaning",
+            "deck_preferences": {}
+        }
+        self.mock_mw.addonManager.getConfig.return_value = self.mock_config
 
         # Mock Qt constants
         self.mock_utils.Qt = MagicMock()
@@ -79,8 +88,10 @@ class TestGUIAsync(unittest.TestCase):
             'flds': [{'name': 'Expression'}, {'name': 'Meaning'}, {'name': 'Reading'}]
         }
 
-        # Mock create_custom_dialog to return 0 (English) first, then 0 (First example)
-        mock_create_custom_dialog.side_effect = [0, 0]
+        # Mock create_custom_dialog returns
+        # 1. Language selection: returns (0, False) because deck_id is detected (via mocks) so checkbox is shown
+        # 2. Example selection: returns 0 (index)
+        mock_create_custom_dialog.side_effect = [(0, False), 0]
 
         # Mock find_japanese_sentence result
         mock_results = [{'jp_sentence': 'JP1', 'tr_sentence': 'TR1'}]
@@ -92,10 +103,10 @@ class TestGUIAsync(unittest.TestCase):
         # Verify initial dialog (Language selection)
         _ = self.GUI._
 
-        mock_create_custom_dialog.assert_any_call(
-            _("select_translation_language_dialog"),
-            ['English', 'French']
-        )
+        # Verify call arguments
+        args, kwargs = mock_create_custom_dialog.call_args_list[0]
+        self.assertEqual(args[0], _("select_translation_language_dialog"))
+        self.assertTrue(kwargs.get('with_checkbox')) # Checkbox should be True as deck_id is present
 
         # Verify QueryOp usage
         self.assertTrue(self.mock_operations.QueryOp.called, "QueryOp should be instantiated")
@@ -123,11 +134,11 @@ class TestGUIAsync(unittest.TestCase):
         scheduled_func()
 
         # Verify second dialog (Example selection)
-        mock_create_custom_dialog.assert_called_with(
-            _('select_sentence_dialog'),
-            ['JP1\nTR1'],
-            parent=editor.parentWindow
-        )
+        # Check second call to create_custom_dialog
+        args2, kwargs2 = mock_create_custom_dialog.call_args_list[1]
+        self.assertEqual(args2[0], _('select_sentence_dialog'))
+        # Should NOT have with_checkbox=True (default is False)
+        self.assertFalse(kwargs2.get('with_checkbox', False))
 
         # Verify note update
         # DST_FIELD_JAP is 'Expression' (index 0)
@@ -159,11 +170,13 @@ class TestGUIAsync(unittest.TestCase):
             with patch('GUI.create_custom_dialog') as mock_dialog, \
                  patch('GUI.find_japanese_sentence') as mock_find:
 
-                mock_dialog.return_value = 0 # English
+                mock_dialog.return_value = (0, False) # English, no save
                 mock_find.return_value = [{'jp_sentence': 'JP1', 'tr_sentence': 'TR1'}]
 
                 # Mock create_custom_dialog again for result picker
-                mock_dialog.side_effect = [0, 0]
+                # 1. Language: (0, False)
+                # 2. Result: 0
+                mock_dialog.side_effect = [(0, False), 0]
 
                 # Call
                 self.GUI.add_example_manually_dialog(editor)

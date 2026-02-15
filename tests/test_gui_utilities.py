@@ -32,6 +32,7 @@ class TestGUIUtilities(unittest.TestCase):
             'aqt.operations': self.mock_operations,
             'aqt.utils': self.mock_utils,
             'aqt.gui_hooks': self.mock_gui_hooks,
+            'aqt.qt': MagicMock(),
             'PyQt5': self.mock_pyqt5,
             'PyQt5.QtCore': self.mock_pyqt5_qtcore
         })
