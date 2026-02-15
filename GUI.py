@@ -14,6 +14,9 @@ try:
 except ImportError:
     QueryOp = None
 
+# Global set to keep references to active operations to prevent premature garbage collection
+_active_ops = set()
+
 def get_qt_version():
     """ Return the version of Qt used by Anki.
     """
@@ -143,7 +146,14 @@ def add_example_manually_dialog(editor):
         # Should not happen given the dialog choices
         return
 
+    # Define op variable to be accessible in on_success
+    op = None
+
     def on_success(examples_sentences):
+        # Cleanup op reference to avoid memory leak
+        if op:
+            _active_ops.discard(op)
+
         if examples_sentences is None:
             showInfo(_('example_not_found'))
             return
@@ -214,6 +224,7 @@ def add_example_manually_dialog(editor):
             op=lambda col: find_japanese_sentence(japanese_word, target_lang),
             success=on_success
         )
+        _active_ops.add(op)
         op.with_progress(_("searching")).run_in_background()
     else:
         # Fallback for older versions: blocking call
