@@ -159,85 +159,92 @@ def add_example_manually_dialog(editor):
         if op:
             _active_ops.discard(op)
 
-        if examples_sentences is None:
-            showInfo(_('example_not_found'))
-            return
-        
-        elif isinstance(examples_sentences, str):
-            showInfo(examples_sentences)
-            return
-        
-        else:
-            try:
-                examples = [f"{example['jp_sentence']}\n{example['tr_sentence']}" for example in examples_sentences]
-            except TypeError:
-                showInfo(_('example_not_found_check_encoding'))
-                return
-
-        def show_result_dialog():
-            # Ensure progress dialog is finished
+        # Function to safely execute a callback only after the progress dialog has closed
+        def safe_execute(callback):
             try:
                 if mw.progress.busy():
-                    QTimer.singleShot(100, show_result_dialog)
+                    # If busy, try again in 100ms
+                    QTimer.singleShot(100, lambda: safe_execute(callback))
                     return
             except AttributeError:
                 # In case mw.progress is not available (very old versions)
                 pass
 
-            # User choses which example to add
-            # We pass the parent window explicitly to avoid attaching to the progress dialog
-            # Use editor.parentWindow (Browser/Add window) as parent.
-            # With QTimer delay, the progress dialog should be closed and focus restored.
-            example_picker_index = create_custom_dialog(
-            _('select_sentence_dialog'),
-            examples,
-            parent=editor.parentWindow
-            )
+            # Execute the actual logic
+            callback()
 
-            if example_picker_index is None:
-                showInfo(_('no_example_selected'))
+        # Define the logic for different outcomes
+        def handle_result():
+            if examples_sentences is None:
+                showInfo(_('example_not_found'))
+                return
+
+            elif isinstance(examples_sentences, str):
+                showInfo(examples_sentences)
                 return
 
             else:
-                chosen_example = examples_sentences[example_picker_index]
-                jp_sentence = chosen_example['jp_sentence']
-                tr_sentence = chosen_example['tr_sentence']
-
-                # Get the current note opened in the editor
-                note = editor.note
-
-                # Get the field names
-                note_type = note.note_type()
-                fields = note_type['flds']
-                field_names = [field['name'] for field in fields]
-
-                # Find the index of the target fields, according to the ones defined in the config file
                 try:
-                    jp_field_index = field_names.index(DST_FIELD_JAP)
-                except ValueError:
-                    showInfo(_("{DST_FIELD_JAP}_field_not_found").format(DST_FIELD_JAP=DST_FIELD_JAP))
+                    examples = [f"{example['jp_sentence']}\n{example['tr_sentence']}" for example in examples_sentences]
+                except TypeError:
+                    showInfo(_('example_not_found_check_encoding'))
                     return
 
-                try:
-                    en_field_index = field_names.index(DST_FIELD_TRANSLATION)
-                except ValueError:
-                    showInfo(_("{DST_FIELD_TRANSLATION}_field_not_found").format(DST_FIELD_TRANSLATION=DST_FIELD_TRANSLATION))
-                    return
+                def show_result_dialog():
+                    # User choses which example to add
+                    # We pass the parent window explicitly to avoid attaching to the progress dialog
+                    # Use editor.parentWindow (Browser/Add window) as parent.
+                    example_picker_index = create_custom_dialog(
+                    _('select_sentence_dialog'),
+                    examples,
+                    parent=editor.parentWindow
+                    )
 
-                # Set the value of the field
-                note.fields[jp_field_index] = html.escape(jp_sentence)
-                note.fields[en_field_index]= html.escape(tr_sentence)
+                    if example_picker_index is None:
+                        showInfo(_('no_example_selected'))
+                        return
 
-                # Save the changes to the note if the note already exists
-                if note.id != 0 :
-                    mw.col.update_note(note)
+                    else:
+                        chosen_example = examples_sentences[example_picker_index]
+                        jp_sentence = chosen_example['jp_sentence']
+                        tr_sentence = chosen_example['tr_sentence']
 
-                # Update the editor to show the changes
-                editor.loadNote()
+                        # Get the current note opened in the editor
+                        note = editor.note
 
-        # Schedule the dialog to open on the next event loop iteration
-        # allowing the progress dialog to close cleanly first.
-        QTimer.singleShot(200, show_result_dialog)
+                        # Get the field names
+                        note_type = note.note_type()
+                        fields = note_type['flds']
+                        field_names = [field['name'] for field in fields]
+
+                        # Find the index of the target fields, according to the ones defined in the config file
+                        try:
+                            jp_field_index = field_names.index(DST_FIELD_JAP)
+                        except ValueError:
+                            showInfo(_("{DST_FIELD_JAP}_field_not_found").format(DST_FIELD_JAP=DST_FIELD_JAP))
+                            return
+
+                        try:
+                            en_field_index = field_names.index(DST_FIELD_TRANSLATION)
+                        except ValueError:
+                            showInfo(_("{DST_FIELD_TRANSLATION}_field_not_found").format(DST_FIELD_TRANSLATION=DST_FIELD_TRANSLATION))
+                            return
+
+                        # Set the value of the field
+                        note.fields[jp_field_index] = html.escape(jp_sentence)
+                        note.fields[en_field_index]= html.escape(tr_sentence)
+
+                        # Save the changes to the note if the note already exists
+                        if note.id != 0 :
+                            mw.col.update_note(note)
+
+                        # Update the editor to show the changes
+                        editor.loadNote()
+
+                show_result_dialog()
+
+        # Schedule the execution with initial delay
+        QTimer.singleShot(200, lambda: safe_execute(handle_result))
 
     # Use QueryOp if available (Anki 2.1.50+), otherwise fall back to blocking call
     if QueryOp:
