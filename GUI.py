@@ -1,8 +1,26 @@
 from aqt import gui_hooks, mw
 from aqt.utils import Qt, QDialog, QVBoxLayout, QLabel, QListWidget, QDialogButtonBox
 from aqt.utils import showInfo
-import os, gettext, shutil
-from .japanese_examples import find_japanese_sentence, DST_FIELD_TRANSLATION, DST_FIELD_JAP
+import os, json, html
+
+try:
+    from PyQt5.QtCore import QTimer
+except ImportError:
+    from PyQt6.QtCore import QTimer
+
+try:
+    from .japanese_examples import find_japanese_sentence, DST_FIELD_TRANSLATION, DST_FIELD_JAP
+except ImportError:
+    from japanese_examples import find_japanese_sentence, DST_FIELD_TRANSLATION, DST_FIELD_JAP
+
+# Try to import QueryOp for background operations (Anki 2.1.50+)
+try:
+    from aqt.operations import QueryOp
+except ImportError:
+    QueryOp = None
+
+# Global set to keep references to active operations to prevent premature garbage collection
+_active_ops = set()
 
 def get_qt_version():
     """ Return the version of Qt used by Anki.
@@ -40,18 +58,22 @@ def get_plugin_dir_path():
 
     return plugin_dir_path
 
-def get_current_language():
-    language = mw.pm.meta.get('defaultLang', 'en')
-    return language
+try:
+    from .i18n import _
+except ImportError:
+    from i18n import _
 
-def create_custom_dialog(message, choices, start_row=0):
+def create_custom_dialog(message, choices, start_row=0, parent=None):
     """ This function creates a custom dialog with a selection list
         and OK/Cancel buttons. It is based on code from Anki
         open-source project.
     """
 
-    # get the active window of the application
-    parent_window = mw.app.activeWindow()
+    # get the active window of the application if no parent is provided
+    if parent is None:
+        parent_window = mw.app.activeWindow()
+    else:
+        parent_window = parent
 
     # initialize a new dialog
     dialog = QDialog(parent_window)
@@ -93,54 +115,6 @@ def create_custom_dialog(message, choices, start_row=0):
     # return the current row of the selection list
     return selection_list.currentRow()
 
-def setup_i18n():
-    # Set up the translation system
-    lang = get_current_language()
-    localedir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'locale')
-    current_package_name = __name__.split('.')[0]
-
-    # Optimization: Check if renaming is necessary by using a sentinel file
-    sentinel_path = os.path.join(localedir, ".last_package_name")
-    needs_renaming = True
-    if os.path.exists(sentinel_path):
-        try:
-            with open(sentinel_path, "r", encoding="utf-8") as f:
-                if f.read().strip() == current_package_name:
-                    needs_renaming = False
-        except Exception:
-            pass
-
-    if needs_renaming:
-        # List all files in the locale directory
-        for root, _, files in os.walk(localedir):
-            for file in files:
-                # If the file doesn't already match the package name and it's a translation file, rename it
-                if not file.startswith(current_package_name) and file.endswith(('.mo', '.po')):
-                    old_file_path = os.path.join(root, file)
-                    new_file_path = os.path.join(root, current_package_name + os.path.splitext(file)[1])
-                    try:
-                        shutil.move(old_file_path, new_file_path)
-                    except Exception:
-                        pass
-
-        # Update or create the sentinel file
-        try:
-            with open(sentinel_path, "w", encoding="utf-8") as f:
-                f.write(current_package_name)
-        except Exception:
-            pass
-
-    try:
-        translation = gettext.translation(__name__.split('.')[0], localedir, languages=[lang], fallback=True)
-        if isinstance(translation, gettext.NullTranslations):
-            translation = gettext.translation(__name__.split('.')[0], localedir, languages=['en_US'], fallback=True)
-            translation.install()
-        else:
-            translation.install()
-
-    except FileNotFoundError:
-        translation = gettext.translation(__name__.split('.')[0], localedir, languages=['en_US'], fallback=True)
-        translation.install()
 
 
 def add_example_manually_dialog(editor):
@@ -150,6 +124,12 @@ def add_example_manually_dialog(editor):
 
     if editor.web.editor.currentField is None or editor.web.editor.currentField == '':
         showInfo(_('select_field_to_use'))
+        return
+
+    japanese_word = editor.note.fields[editor.web.editor.currentField]
+
+    if not japanese_word or not japanese_word.strip():
+        showInfo(_("no_japanese_sentence_found").format(word=japanese_word))
         return
 
     # User choses where to get the examples from
@@ -162,93 +142,109 @@ def add_example_manually_dialog(editor):
     if source_index is None:
         return None
     
-    japanese_word = editor.note.fields[editor.web.editor.currentField]
-
-    # Retrieve examples in english
+    # Determine target language code
     if source_index == 0:
-
-        examples_sentences = find_japanese_sentence(japanese_word, 'eng')
-
-        if examples_sentences is None:
-            showInfo(_('example_not_found'))
-            return None
-        
-        elif isinstance(examples_sentences, str):
-            showInfo(examples_sentences)
-            return None
-        
-        else:
-            try:
-                examples = [f"{example['jp_sentence']}\n{example['tr_sentence']}" for example in examples_sentences]
-            except TypeError:
-                showInfo(_('example_not_found_check_encoding'))
-                return None
-
-    # Retrieve examples in french
+        target_lang = 'eng'
     elif source_index == 1:
+        target_lang = 'fra'
+    else:
+        # Should not happen given the dialog choices
+        return
 
-        examples_sentences = find_japanese_sentence(japanese_word, 'fra')
+    # Define op variable to be accessible in on_success
+    op = None
+
+    def on_success(examples_sentences):
+        # Cleanup op reference to avoid memory leak
+        if op:
+            _active_ops.discard(op)
 
         if examples_sentences is None:
             showInfo(_('example_not_found'))
-            return None
+            return
         
         elif isinstance(examples_sentences, str):
             showInfo(examples_sentences)
-            return None
+            return
         
         else:
             try:
                 examples = [f"{example['jp_sentence']}\n{example['tr_sentence']}" for example in examples_sentences]
             except TypeError:
                 showInfo(_('example_not_found_check_encoding'))
-                return None
-    
-    # User choses which example to add   
-    example_picker_index = create_custom_dialog(
-    _('select_sentence_dialog'), 
-    examples
-    )
+                return
 
-    if example_picker_index is None:
-        return showInfo(_('no_example_selected'))
-    
+        def show_result_dialog():
+            # User choses which example to add
+            # We pass the parent window explicitly to avoid attaching to the progress dialog
+            # Use editor.parentWindow (Browser/Add window) as parent.
+            # With QTimer delay, the progress dialog should be closed and focus restored.
+            example_picker_index = create_custom_dialog(
+            _('select_sentence_dialog'),
+            examples,
+            parent=editor.parentWindow
+            )
+
+            if example_picker_index is None:
+                showInfo(_('no_example_selected'))
+                return
+
+            else:
+                chosen_example = examples_sentences[example_picker_index]
+                jp_sentence = chosen_example['jp_sentence']
+                tr_sentence = chosen_example['tr_sentence']
+
+                # Get the current note opened in the editor
+                note = editor.note
+
+                # Get the field names
+                note_type = note.note_type()
+                fields = note_type['flds']
+                field_names = [field['name'] for field in fields]
+
+                # Find the index of the target fields, according to the ones defined in the config file
+                try:
+                    jp_field_index = field_names.index(DST_FIELD_JAP)
+                except ValueError:
+                    showInfo(_("{DST_FIELD_JAP}_field_not_found").format(DST_FIELD_JAP=DST_FIELD_JAP))
+                    return
+
+                try:
+                    en_field_index = field_names.index(DST_FIELD_TRANSLATION)
+                except ValueError:
+                    showInfo(_("{DST_FIELD_TRANSLATION}_field_not_found").format(DST_FIELD_TRANSLATION=DST_FIELD_TRANSLATION))
+                    return
+
+                # Set the value of the field
+                note.fields[jp_field_index] = html.escape(jp_sentence)
+                note.fields[en_field_index]= html.escape(tr_sentence)
+
+                # Save the changes to the note if the note already exists
+                if note.id != 0 :
+                    mw.col.update_note(note)
+
+                # Update the editor to show the changes
+                editor.loadNote()
+
+        # Schedule the dialog to open on the next event loop iteration
+        # allowing the progress dialog to close cleanly first.
+        QTimer.singleShot(100, show_result_dialog)
+
+    # Use QueryOp if available (Anki 2.1.50+), otherwise fall back to blocking call
+    if QueryOp:
+        # Pass editor.parentWindow as parent so the progress dialog attaches to the correct window
+        # (Browser/Add window) instead of the main window. This ensures focus returns correctly when closing.
+        op = QueryOp(
+            parent=editor.parentWindow,
+            op=lambda col: find_japanese_sentence(japanese_word, target_lang),
+            success=on_success
+        )
+        _active_ops.add(op)
+        op.with_progress(_("searching")).run_in_background()
     else:
-        chosen_example = examples_sentences[example_picker_index]
-        jp_sentence = chosen_example['jp_sentence']
-        tr_sentence = chosen_example['tr_sentence']
-
-        # Get the current note opened in the editor
-        note = editor.note
-
-        # Get the field names
-        note_type = note.note_type()
-        fields = note_type['flds']
-        field_names = [field['name'] for field in fields]
-
-        # Find the index of the target fields, according to the ones defined in the config file
-        try:
-            jp_field_index = field_names.index(DST_FIELD_JAP)
-        except ValueError:
-            showInfo(_("{DST_FIELD_JAP}_field_not_found").format(DST_FIELD_JAP=DST_FIELD_JAP))
-            return
-        
-        try:
-            en_field_index = field_names.index(DST_FIELD_TRANSLATION)
-        except ValueError:
-            showInfo(_("{DST_FIELD_TRANSLATION}_field_not_found").format(DST_FIELD_TRANSLATION=DST_FIELD_TRANSLATION))
-            return
-
-        # Set the value of the field
-        note.fields[jp_field_index] = jp_sentence
-        note.fields[en_field_index]= tr_sentence
-
-        # Save the changes to the note if the note already exists
-        if note.id != 0 :
-            note.flush()
-
-        # Update the editor to show the changes
-        editor.loadNote()
+        # Fallback for older versions: blocking call
+        examples_sentences = find_japanese_sentence(japanese_word, target_lang)
+        on_success(examples_sentences)
 
 def add_examples_buttons(buttons, editor):
     """ Add buttons to editor menu.
@@ -268,4 +264,3 @@ def add_examples_buttons(buttons, editor):
 # Link buttons to Anki
 gui_hooks.editor_did_init_buttons.append(add_examples_buttons)
 
-setup_i18n()
