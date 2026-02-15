@@ -16,13 +16,21 @@ class TestGUIAsync(unittest.TestCase):
         self.mock_utils = MagicMock()
         self.mock_gui_hooks = MagicMock()
 
+        # Mock PyQt5
+        self.mock_pyqt5 = MagicMock()
+        self.mock_pyqt5_qtcore = MagicMock()
+        self.mock_pyqt5.QtCore = self.mock_pyqt5_qtcore
+        self.mock_pyqt5_qtcore.QTimer = MagicMock()
+
         # Patch sys.modules to simulate aqt existence
         self.modules_patcher = patch.dict(sys.modules, {
             'aqt': self.mock_aqt,
             'aqt.mw': self.mock_mw,
             'aqt.operations': self.mock_operations,
             'aqt.utils': self.mock_utils,
-            'aqt.gui_hooks': self.mock_gui_hooks
+            'aqt.gui_hooks': self.mock_gui_hooks,
+            'PyQt5': self.mock_pyqt5,
+            'PyQt5.QtCore': self.mock_pyqt5_qtcore
         })
         self.modules_patcher.start()
 
@@ -61,29 +69,7 @@ class TestGUIAsync(unittest.TestCase):
     def test_add_example_manually_dialog_flow(self, mock_showInfo, mock_create_custom_dialog, mock_find_japanese_sentence):
         # Setup mocks
         editor = MagicMock()
-        editor.web.editor.currentField = 'Expression'
-        # Note fields are usually a list of values, but here it seems accessed by index or something.
-        # Wait, the code: editor.note.fields[jp_field_index] = jp_sentence
-        # And: japanese_word = editor.note.fields[editor.web.editor.currentField]
-        # This implies fields is dict-like or Anki's Note object supports access by name?
-        # Standard Anki Note.fields is a list of strings. Access by name uses note['Name'].
-        # But `editor.note.fields` is usually the list.
-        # Let's check the code: `japanese_word = editor.note.fields[editor.web.editor.currentField]`
-        # If `currentField` is an index (int), this works.
-        # If `currentField` is a name (str), `note.fields` (list) would raise TypeError.
-        # But `editor.web.editor.currentField` usually returns the field index in older Anki, or name?
-
-        # In `GUI.py`: `japanese_word = editor.note.fields[editor.web.editor.currentField]`
-        # If `currentField` is int, fine.
-
-        # But later: `note.fields[jp_field_index] = jp_sentence`
-        # `jp_field_index` is found via `field_names.index(DST_FIELD_JAP)`.
-
-        # So `fields` behaves like a list.
-        # If `editor.web.editor.currentField` is an int (index), then `editor.note.fields` is list.
-
-        # Let's assume currentField is an int index for the mocking purpose.
-        editor.web.editor.currentField = 0
+        editor.web.editor.currentField = 0 # Assuming index
 
         # Mock fields list
         editor.note.fields = ['test_word', '', '']
@@ -126,6 +112,14 @@ class TestGUIAsync(unittest.TestCase):
 
         # Simulate success callback with results
         success_callback(mock_results)
+
+        # Execute the scheduled function by QTimer
+        # Verify singleShot called
+        self.mock_pyqt5_qtcore.QTimer.singleShot.assert_called()
+        timer_args = self.mock_pyqt5_qtcore.QTimer.singleShot.call_args[0]
+        # singleShot(delay, func)
+        scheduled_func = timer_args[1]
+        scheduled_func()
 
         # Verify second dialog (Example selection)
         mock_create_custom_dialog.assert_called_with(
@@ -172,6 +166,12 @@ class TestGUIAsync(unittest.TestCase):
 
                 # Call
                 self.GUI.add_example_manually_dialog(editor)
+
+                # QTimer should have been called in on_success
+                self.mock_pyqt5_qtcore.QTimer.singleShot.assert_called()
+                timer_args = self.mock_pyqt5_qtcore.QTimer.singleShot.call_args[0]
+                scheduled_func = timer_args[1]
+                scheduled_func()
 
                 # Verify find_japanese_sentence called directly (synchronously)
                 mock_find.assert_called_with('test_word', 'eng')
