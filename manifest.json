@@ -10,6 +10,8 @@
         "GUI.py",
         "config.json",
         "config.md",
+        "config_ui.py",
+        "i18n.py",
         "editor_icon_manual.png"
     ]
 }
