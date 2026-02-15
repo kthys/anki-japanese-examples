@@ -10,5 +10,12 @@
     "add_example_manually_tip": "Add an example sentence manually",
     "error_tatoeba_connection": "Error: Unable to connect to Tatoeba API.",
     "no_japanese_sentence_found": "No Japanese sentence found containing the word '{word}'.",
-    "searching": "Searching..."
+    "searching": "Searching...",
+    "use_as_default_for_deck": "Use as default for this deck",
+    "reset_deck_preferences": "Reset Deck Preferences",
+    "settings_dialog_title": "Japanese Examples Addon Settings",
+    "japanese_field_label": "Japanese Field Name:",
+    "translation_field_label": "Translation Field Name:",
+    "deck_preferences_reset": "Deck preferences have been reset.",
+    "deck_preference_info_tooltip": "This preference can be reset in the addon's settings."
 }
