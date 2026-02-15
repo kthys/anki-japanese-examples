@@ -9,5 +9,6 @@
     "{DST_FIELD_TRANSLATION}_field_not_found": "Champs {DST_FIELD_TRANSLATION} non trouvé dans la note en cours d'édition.",
     "add_example_manually_tip": "Ajouter un exemple manuellement",
     "error_tatoeba_connection": "Erreur : Impossible de se connecter à l'API Tatoeba.",
-    "no_japanese_sentence_found": "Aucune phrase japonaise trouvée contenant le mot '{word}'."
+    "no_japanese_sentence_found": "Aucune phrase japonaise trouvée contenant le mot '{word}'.",
+    "searching": "Recherche..."
 }
