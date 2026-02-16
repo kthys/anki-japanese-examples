@@ -1,0 +1,33 @@
+name: Build & Release Anki Addon
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build_and_release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+      - name: Build .ankiaddon file
+        run: |
+          # On zip le contenu du dossier courant, en excluant git et github
+          zip -r japanese-examples-${{ env.VERSION }}.ankiaddon . -x "*.git*" "*.github*" ".gitignore" "README.md" "screenshots/*"
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ./japanese-examples-${{ env.VERSION }}.ankiaddon
+          name: Release ${{ env.VERSION }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true # Génère auto le changelog basé sur tes commits
