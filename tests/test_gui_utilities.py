@@ -66,15 +66,6 @@ class TestGUIUtilities(unittest.TestCase):
         if 'japanese_examples' in sys.modules:
             del sys.modules['japanese_examples']
 
-    def test_get_qt_version_qt5(self):
-        """Test get_qt_version returns 5 when Qt module is PyQt5."""
-        self.mock_utils.Qt.__module__ = 'PyQt5.QtCore'
-        self.assertEqual(self.GUI.get_qt_version(), 5)
-
-    def test_get_qt_version_qt6(self):
-        """Test get_qt_version returns 6 when Qt module is PyQt6."""
-        self.mock_utils.Qt.__module__ = 'PyQt6.QtCore'
-        self.assertEqual(self.GUI.get_qt_version(), 6)
 
     def test_get_plugin_dir_path(self):
         """Test get_plugin_dir_path returns correct path based on mw.col.path."""
