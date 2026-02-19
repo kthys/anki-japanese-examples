@@ -19,7 +19,6 @@ jobs:
 
       - name: Build .ankiaddon file
         run: |
-          # On zip le contenu du dossier courant, en excluant git et github
           zip -r japanese-examples-${{ env.VERSION }}.ankiaddon . -x "*.git*" "*.github*" ".gitignore" "README.md" "screenshots/*"
 
       - name: Create Release
@@ -30,4 +29,4 @@ jobs:
           name: Release ${{ env.VERSION }}
           draft: false
           prerelease: false
-          generate_release_notes: true # Génère auto le changelog basé sur tes commits
+          generate_release_notes: true
