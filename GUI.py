@@ -23,28 +23,6 @@ except ImportError:
 # Global set to keep references to active operations to prevent premature garbage collection
 _active_ops = set()
 
-def get_qt_version():
-    """ Return the version of Qt used by Anki.
-    """
-
-    qt_ver = 5  # assume 5 for now
-
-    if Qt.__module__ == 'PyQt5.QtCore':
-        # PyQt5
-        # tested on aqt[qt5]
-        qt_ver = 5
-    elif Qt.__module__ == 'PyQt6.QtCore':
-        # PyQt6
-        # tested on aqt[qt6]
-        qt_ver = 6
-
-    # NOTE
-    # when Anki runs with the temporary Qt5 compatibility
-    # shims, Qt.__module__ is 'PyQt6.sip.wrappertype', but
-    # then it should also be no problem to defer to 5
-
-    return qt_ver
-
 
 def get_plugin_dir_path():
     """ Determine and return the path of the plugin directory.
