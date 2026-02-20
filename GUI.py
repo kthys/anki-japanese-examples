@@ -25,7 +25,11 @@ _active_ops = set()
 
 
 def get_plugin_dir_path():
-    """ Determine and return the path of the plugin directory.
+    """
+    Determine and return the path of the plugin directory.
+
+    Returns:
+    - The absolute string path to the plugin directory.
     """
 
     collection_path = mw.col.path
@@ -43,9 +47,22 @@ except ImportError:
     from i18n import _
 
 def create_custom_dialog(message, choices, start_row=0, parent=None, with_checkbox=False, checkbox_text=""):
-    """ This function creates a custom dialog with a selection list
-        and OK/Cancel buttons. It is based on code from Anki
-        open-source project.
+    """
+    This function creates a custom dialog with a selection list
+    and OK/Cancel buttons. It is based on code from Anki
+    open-source project.
+
+    Args:
+    - message (str): The label message to display at the top of the dialog.
+    - choices (list): A list of strings representing the options for the selection list.
+    - start_row (int): The index of the initially selected row. Default is 0.
+    - parent (QWidget): The parent window for the dialog. Default is None.
+    - with_checkbox (bool): Whether to include a checkbox in the dialog. Default is False.
+    - checkbox_text (str): The text description for the checkbox, if included. Default is "".
+
+    Returns:
+    - If with_checkbox is False: Returns the integer index of the selected row, or None if the dialog is cancelled.
+    - If with_checkbox is True: Returns a tuple containing the integer index of the selected row and a boolean indicating if the checkbox is checked, or None if the dialog is cancelled.
     """
 
     # get the active window of the application if no parent is provided
@@ -113,7 +130,15 @@ def create_custom_dialog(message, choices, start_row=0, parent=None, with_checkb
 
 
 def get_current_deck_id(editor):
-    """ Get the deck ID of the current note or selected deck. """
+    """
+    Get the deck ID of the current note or selected deck.
+
+    Args:
+    - editor (Editor): The Anki editor instance currently in use.
+
+    Returns:
+    - The integer deck ID if found, otherwise None.
+    """
     # Check if we are in Add Cards dialog
     if hasattr(editor.parentWindow, 'deckChooser'):
         return editor.parentWindow.deckChooser.selectedId()
@@ -127,8 +152,15 @@ def get_current_deck_id(editor):
     return None
 
 def add_example_manually_dialog(editor):
-    """ Dialog for adding an example of sentence based on japanese word present in the selected field.
-        The target fields are defined in the config file.
+    """
+    Dialog for adding an example of sentence based on japanese word present in the selected field.
+    The target fields are defined in the config file.
+
+    Args:
+    - editor (Editor): The Anki editor instance triggered the dialog.
+
+    Returns:
+    - None
     """
 
     if editor.web.editor.currentField is None or editor.web.editor.currentField == '':
@@ -301,7 +333,15 @@ def add_example_manually_dialog(editor):
         on_success(examples_sentences)
 
 def add_examples_buttons(buttons, editor):
-    """ Add buttons to editor menu.
+    """
+    Add buttons to editor menu.
+
+    Args:
+    - buttons (list): The list of existing buttons in the editor.
+    - editor (Editor): The Anki editor instance to which the buttons are added.
+
+    Returns:
+    - None
     """
 
     # manual mode
