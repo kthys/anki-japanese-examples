@@ -19,8 +19,23 @@ logger = logging.getLogger(__name__)
 #  Fetch config
 config = mw.addonManager.getConfig(__name__)
 
-DST_FIELD_JAP = config["japaneseDstField"]
-DST_FIELD_TRANSLATION = config["translationDstField"]
+if not isinstance(config, dict) or "japaneseDstField" not in config or "translationDstField" not in config:
+    logger.warning("Configuration is missing or invalid.")
+    try:
+        from aqt.utils import showWarning
+        showWarning(
+            "Japanese Examples add-on:\n\n"
+            "Configuration is missing or invalid.\n"
+            "Please check the add-on configuration.\n"
+            "Using default fields ('ExampleJapanese' and 'ExampleTranslated')."
+        )
+    except Exception as e:
+        logger.error(f"Could not show warning dialog: {e}")
+        
+    config = config if isinstance(config, dict) else {}
+
+DST_FIELD_JAP = config.get("japaneseDstField", "ExampleJapanese")
+DST_FIELD_TRANSLATION = config.get("translationDstField", "ExampleTranslated")
 
 #############################################
 
