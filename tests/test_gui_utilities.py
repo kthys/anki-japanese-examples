@@ -66,32 +66,10 @@ class TestGUIUtilities(unittest.TestCase):
         if 'japanese_examples' in sys.modules:
             del sys.modules['japanese_examples']
 
-    def test_get_qt_version_qt5(self):
-        """Test get_qt_version returns 5 when Qt module is PyQt5."""
-        self.mock_utils.Qt.__module__ = 'PyQt5.QtCore'
-        self.assertEqual(self.GUI.get_qt_version(), 5)
-
-    def test_get_qt_version_qt6(self):
-        """Test get_qt_version returns 6 when Qt module is PyQt6."""
-        self.mock_utils.Qt.__module__ = 'PyQt6.QtCore'
-        self.assertEqual(self.GUI.get_qt_version(), 6)
 
     def test_get_plugin_dir_path(self):
-        """Test get_plugin_dir_path returns correct path based on mw.col.path."""
-        # Setup mock collection path
-        # Assume standard structure: .../User 1/collection.anki2
-        # And plugin directory: .../addons21/plugin_name
-
-        collection_path = "/home/user/Anki/User 1/collection.anki2"
-        self.mock_mw.col.path = collection_path
-
-        # Expected path derivation
-        # user_dir = /home/user/Anki/User 1
-        # anki_dir = /home/user/Anki
-        # plugin_dir = /home/user/Anki/addons21/GUI (since __name__ is GUI)
-
-        expected_path = os.path.join("/home/user/Anki", "addons21", "GUI")
-
+        """Test get_plugin_dir_path returns correct path based on __file__."""
+        expected_path = os.path.dirname(os.path.abspath(self.GUI.__file__))
         result = self.GUI.get_plugin_dir_path()
         self.assertEqual(result, expected_path)
 

@@ -1,7 +1,6 @@
 from aqt import gui_hooks, mw
-from aqt.utils import Qt, QDialog, QVBoxLayout, QLabel, QListWidget, QDialogButtonBox
+from aqt.utils import Qt, QDialog, QVBoxLayout, QLabel, QListWidget, QDialogButtonBox, showInfo
 from aqt.qt import QCheckBox, QLineEdit, QPushButton, QFormLayout, QHBoxLayout
-from aqt.utils import showInfo
 import os, html
 
 try:
@@ -23,41 +22,15 @@ except ImportError:
 # Global set to keep references to active operations to prevent premature garbage collection
 _active_ops = set()
 
-def get_qt_version():
-    """ Return the version of Qt used by Anki.
-    """
-
-    qt_ver = 5  # assume 5 for now
-
-    if Qt.__module__ == 'PyQt5.QtCore':
-        # PyQt5
-        # tested on aqt[qt5]
-        qt_ver = 5
-    elif Qt.__module__ == 'PyQt6.QtCore':
-        # PyQt6
-        # tested on aqt[qt6]
-        qt_ver = 6
-
-    # NOTE
-    # when Anki runs with the temporary Qt5 compatibility
-    # shims, Qt.__module__ is 'PyQt6.sip.wrappertype', but
-    # then it should also be no problem to defer to 5
-
-    return qt_ver
-
 
 def get_plugin_dir_path():
-    """ Determine and return the path of the plugin directory.
     """
+    Determine and return the path of the plugin directory.
 
-    collection_path = mw.col.path
-    plugin_dir_name = __name__.split('.')[0]  # remove ".gui"
-
-    user_dir_path = os.path.split(collection_path)[0]
-    anki_dir_path = os.path.split(user_dir_path)[0]
-    plugin_dir_path = os.path.join(anki_dir_path, 'addons21', plugin_dir_name)
-
-    return plugin_dir_path
+    Returns:
+    - The absolute string path to the plugin directory.
+    """
+    return os.path.dirname(os.path.abspath(__file__))
 
 try:
     from .i18n import _
@@ -65,9 +38,22 @@ except ImportError:
     from i18n import _
 
 def create_custom_dialog(message, choices, start_row=0, parent=None, with_checkbox=False, checkbox_text=""):
-    """ This function creates a custom dialog with a selection list
-        and OK/Cancel buttons. It is based on code from Anki
-        open-source project.
+    """
+    This function creates a custom dialog with a selection list
+    and OK/Cancel buttons. It is based on code from Anki
+    open-source project.
+
+    Args:
+    - message (str): The label message to display at the top of the dialog.
+    - choices (list): A list of strings representing the options for the selection list.
+    - start_row (int): The index of the initially selected row. Default is 0.
+    - parent (QWidget): The parent window for the dialog. Default is None.
+    - with_checkbox (bool): Whether to include a checkbox in the dialog. Default is False.
+    - checkbox_text (str): The text description for the checkbox, if included. Default is "".
+
+    Returns:
+    - If with_checkbox is False: Returns the integer index of the selected row, or None if the dialog is cancelled.
+    - If with_checkbox is True: Returns a tuple containing the integer index of the selected row and a boolean indicating if the checkbox is checked, or None if the dialog is cancelled.
     """
 
     # get the active window of the application if no parent is provided
@@ -135,7 +121,15 @@ def create_custom_dialog(message, choices, start_row=0, parent=None, with_checkb
 
 
 def get_current_deck_id(editor):
-    """ Get the deck ID of the current note or selected deck. """
+    """
+    Get the deck ID of the current note or selected deck.
+
+    Args:
+    - editor (Editor): The Anki editor instance currently in use.
+
+    Returns:
+    - The integer deck ID if found, otherwise None.
+    """
     # Check if we are in Add Cards dialog
     if hasattr(editor.parentWindow, 'deckChooser'):
         return editor.parentWindow.deckChooser.selectedId()
@@ -149,8 +143,15 @@ def get_current_deck_id(editor):
     return None
 
 def add_example_manually_dialog(editor):
-    """ Dialog for adding an example of sentence based on japanese word present in the selected field.
-        The target fields are defined in the config file.
+    """
+    Dialog for adding an example of sentence based on japanese word present in the selected field.
+    The target fields are defined in the config file.
+
+    Args:
+    - editor (Editor): The Anki editor instance triggered the dialog.
+
+    Returns:
+    - None
     """
 
     if editor.web.editor.currentField is None or editor.web.editor.currentField == '':
@@ -323,7 +324,15 @@ def add_example_manually_dialog(editor):
         on_success(examples_sentences)
 
 def add_examples_buttons(buttons, editor):
-    """ Add buttons to editor menu.
+    """
+    Add buttons to editor menu.
+
+    Args:
+    - buttons (list): The list of existing buttons in the editor.
+    - editor (Editor): The Anki editor instance to which the buttons are added.
+
+    Returns:
+    - None
     """
 
     # manual mode

@@ -19,18 +19,34 @@ logger = logging.getLogger(__name__)
 #  Fetch config
 config = mw.addonManager.getConfig(__name__)
 
-DST_FIELD_JAP = config["japaneseDstField"]
-DST_FIELD_TRANSLATION = config["translationDstField"]
+if not isinstance(config, dict) or "japaneseDstField" not in config or "translationDstField" not in config:
+    logger.warning("Configuration is missing or invalid.")
+    try:
+        from aqt.utils import showWarning
+        showWarning(
+            "Japanese Examples add-on:\n\n"
+            "Configuration is missing or invalid.\n"
+            "Please check the add-on configuration.\n"
+            "Using default fields ('ExampleJapanese' and 'ExampleTranslated')."
+        )
+    except Exception as e:
+        logger.error(f"Could not show warning dialog: {e}")
+        
+    config = config if isinstance(config, dict) else {}
+
+DST_FIELD_JAP = config.get("japaneseDstField", "ExampleJapanese")
+DST_FIELD_TRANSLATION = config.get("translationDstField", "ExampleTranslated")
 
 #############################################
 
-def find_japanese_sentence(word, translation_language='eng'):
+def find_japanese_sentence(word, translation_language='eng', max_results=50):
     """
     Find Japanese sentences containing a given word using the Tatoeba API.
 
     Args:
     - word (str): The word to search for in Japanese sentences.
     - translation_language (str): The language code for the translation language. Default is 'eng' for English. Possibilities are 'eng' or 'fra'.
+    - max_results (int): The maximum number of results to return. Default is 50.
 
     Returns:
     - A list of dictionaries containing the Japanese sentence and its translation in the specified language.
@@ -42,7 +58,8 @@ def find_japanese_sentence(word, translation_language='eng'):
     params = {
         "query": f"={word}",
         "from": "jpn",
-        "to": translation_language
+        "to": translation_language,
+        "limit": max_results
     }
     # Send a GET request to the Tatoeba API.
     try:
@@ -78,6 +95,6 @@ def find_japanese_sentence(word, translation_language='eng'):
 
         # Check if any sentences were found.
         if sentences:
-            return sentences
+            return sentences[:max_results]
 
     return _("no_japanese_sentence_found").format(word=word)
