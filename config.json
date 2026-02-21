@@ -1,4 +1,5 @@
 {
 	"japaneseDstField": "ExampleJapanese",
-	"translationDstField": "ExampleTranslated"
+	"translationDstField": "ExampleTranslated",
+	"last_seen_version": ""
 }
