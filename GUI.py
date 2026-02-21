@@ -1,7 +1,6 @@
 from aqt import gui_hooks, mw
-from aqt.utils import Qt, QDialog, QVBoxLayout, QLabel, QListWidget, QDialogButtonBox
+from aqt.utils import Qt, QDialog, QVBoxLayout, QLabel, QListWidget, QDialogButtonBox, showInfo
 from aqt.qt import QCheckBox, QLineEdit, QPushButton, QFormLayout, QHBoxLayout
-from aqt.utils import showInfo
 import os, html
 
 try:
@@ -31,15 +30,7 @@ def get_plugin_dir_path():
     Returns:
     - The absolute string path to the plugin directory.
     """
-
-    collection_path = mw.col.path
-    plugin_dir_name = __name__.split('.')[0]  # remove ".gui"
-
-    user_dir_path = os.path.split(collection_path)[0]
-    anki_dir_path = os.path.split(user_dir_path)[0]
-    plugin_dir_path = os.path.join(anki_dir_path, 'addons21', plugin_dir_name)
-
-    return plugin_dir_path
+    return os.path.dirname(os.path.abspath(__file__))
 
 try:
     from .i18n import _

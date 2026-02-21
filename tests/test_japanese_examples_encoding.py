@@ -23,7 +23,6 @@ class TestJapaneseExamples(unittest.TestCase):
         importlib.reload(japanese_examples)
         # Reset mocks before each test
         japanese_examples._session.get.reset_mock()
-        pass
 
     def test_find_japanese_sentence_encoding(self):
         word = "foo&bar"
