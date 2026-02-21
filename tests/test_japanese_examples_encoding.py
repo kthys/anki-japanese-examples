@@ -49,7 +49,8 @@ class TestJapaneseExamples(unittest.TestCase):
         expected_params = {
             'query': f'={word}',
             'from': 'jpn',
-            'to': lang
+            'to': lang,
+            'limit': 50
         }
         self.assertEqual(kwargs['params'], expected_params)
 
