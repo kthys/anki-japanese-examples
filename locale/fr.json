@@ -17,5 +17,14 @@
     "japanese_field_label": "Nom du champ Japonais :",
     "translation_field_label": "Nom du champ Traduction :",
     "deck_preferences_reset": "Les préférences de paquet ont été réinitialisées.",
-    "deck_preference_info_tooltip": "Cette préférence peut être réinitialisée dans les paramètres de l'addon."
+    "deck_preference_info_tooltip": "Cette préférence peut être réinitialisée dans les paramètres de l'addon.",
+    "batch_menu_action": "Traitement en lot Tatoeba",
+    "batch_data_section_title": "Gestion des données locales",
+    "batch_file_not_downloaded": "Statut : Non téléchargé",
+    "batch_file_last_updated": "Statut : Dernière mise à jour {date}",
+    "batch_download_button": "Télécharger les données",
+    "batch_execution_section_title": "Exécution en lot",
+    "batch_skip_existing": "Ignorer les cartes ayant déjà des exemples",
+    "batch_run_button": "Lancer le traitement en lot",
+    "batch_dialog_title": "Traitement en lot Tatoeba"
 }

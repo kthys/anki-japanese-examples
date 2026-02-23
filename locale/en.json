@@ -17,5 +17,14 @@
     "japanese_field_label": "Japanese Field Name:",
     "translation_field_label": "Translation Field Name:",
     "deck_preferences_reset": "Deck preferences have been reset.",
-    "deck_preference_info_tooltip": "This preference can be reset in the addon's settings."
+    "deck_preference_info_tooltip": "This preference can be reset in the addon's settings.",
+    "batch_menu_action": "Tatoeba Batch Processing",
+    "batch_data_section_title": "Local Data Management",
+    "batch_file_not_downloaded": "Status: Not downloaded",
+    "batch_file_last_updated": "Status: Last updated {date}",
+    "batch_download_button": "Download Data",
+    "batch_execution_section_title": "Batch Execution",
+    "batch_skip_existing": "Skip cards that already have examples",
+    "batch_run_button": "Run Batch Processing",
+    "batch_dialog_title": "Tatoeba Batch Processing"
 }
