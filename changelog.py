@@ -4,6 +4,12 @@ import json
 import os
 
 def get_plugin_version():
+    """
+    Get the plugin version from the manifest.json file.
+
+    Returns:
+    - A string containing the plugin version. Default is '1.1.0'.
+    """
     addon_dir = os.path.dirname(__file__)
     manifest_path = os.path.join(addon_dir, "manifest.json")
     try:
@@ -14,6 +20,12 @@ def get_plugin_version():
         return "1.1.0"
 
 def get_changelog_text():
+    """
+    Get the changelog text from the changelog.md file.
+
+    Returns:
+    - A string containing the changelog text. Returns an empty string if an error occurs.
+    """
     addon_dir = os.path.dirname(__file__)
     changelog_path = os.path.join(addon_dir, "changelog.md")
     try:
@@ -23,6 +35,13 @@ def get_changelog_text():
         return ""
 
 def show_changelog_dialog(version, md_text):
+    """
+    Display a popup dialog with the updated changelog information.
+
+    Args:
+    - version (str): The current plugin version to display in the title.
+    - md_text (str): The changelog content formatted as Markdown or plain text.
+    """
     dialog = QDialog(mw)
     dialog.setWindowTitle(f"Japanese Examples Update (v{version})")
     dialog.resize(500, 450)
@@ -45,6 +64,12 @@ def show_changelog_dialog(version, md_text):
     dialog.exec()
 
 def check_and_show_changelog(addon_name):
+    """
+    Check if the add-on has updated and display the changelog dialog if it has.
+
+    Args:
+    - addon_name (str): The name of the add-on to retrieve and update its configuration.
+    """
     config = mw.addonManager.getConfig(addon_name)
     if not config:
         return

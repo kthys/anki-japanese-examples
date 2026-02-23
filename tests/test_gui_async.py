@@ -196,5 +196,49 @@ class TestGUIAsync(unittest.TestCase):
         finally:
             self.GUI.QueryOp = original_query_op
 
+    # ── get_current_deck_id ──────────────────────────────────────────
+
+    def test_get_current_deck_id_from_add_cards(self):
+        """Should return deck ID from deckChooser in Add Cards dialog."""
+        editor = MagicMock()
+        editor.parentWindow.deckChooser.selectedId.return_value = 42
+
+        result = self.GUI.get_current_deck_id(editor)
+        self.assertEqual(result, 42)
+
+    def test_get_current_deck_id_from_browser(self):
+        """Should return deck ID from the first card when in Browser."""
+        editor = MagicMock(spec=[])  # No deckChooser attribute
+        editor.parentWindow = MagicMock(spec=[])  # No deckChooser
+        editor.note = MagicMock()
+        mock_card = MagicMock()
+        mock_card.did = 99
+        editor.note.cards.return_value = [mock_card]
+
+        result = self.GUI.get_current_deck_id(editor)
+        self.assertEqual(result, 99)
+
+    def test_get_current_deck_id_returns_none_when_no_deck(self):
+        """Should return None when no deck info is available."""
+        editor = MagicMock(spec=[])
+        editor.parentWindow = MagicMock(spec=[])
+        editor.note = MagicMock()
+        editor.note.cards.return_value = []
+
+        result = self.GUI.get_current_deck_id(editor)
+        self.assertIsNone(result)
+
+    # ── Early return on empty field ─────────────────────────────────
+
+    @patch('GUI.showInfo')
+    def test_add_example_manually_dialog_returns_early_if_no_field(self, mock_showInfo):
+        """Should call showInfo and return when currentField is None."""
+        editor = MagicMock()
+        editor.web.editor.currentField = None
+
+        self.GUI.add_example_manually_dialog(editor)
+
+        mock_showInfo.assert_called_once()
+
 if __name__ == '__main__':
     unittest.main()
