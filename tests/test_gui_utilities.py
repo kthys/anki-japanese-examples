@@ -120,5 +120,35 @@ class TestGUIUtilities(unittest.TestCase):
         mock_v_layout = self.mock_utils.QVBoxLayout.return_value
         mock_v_layout.addLayout.assert_called_with(mock_h_layout)
 
+    def test_create_custom_dialog_returns_none_on_cancel(self):
+        """Test create_custom_dialog returns None when user cancels."""
+        mock_dialog = self.mock_utils.QDialog.return_value
+        mock_dialog.exec.return_value = 0  # Cancel
+
+        result = self.GUI.create_custom_dialog(
+            "Test Message",
+            ["Choice 1", "Choice 2"]
+        )
+
+        self.assertIsNone(result)
+
+    def test_create_custom_dialog_without_checkbox_returns_index(self):
+        """Test create_custom_dialog without checkbox returns a plain integer index."""
+        mock_dialog = self.mock_utils.QDialog.return_value
+        mock_dialog.exec.return_value = 1  # OK
+
+        mock_selection_list = self.mock_utils.QListWidget.return_value
+        mock_selection_list.currentRow.return_value = 1
+
+        result = self.GUI.create_custom_dialog(
+            "Test Message",
+            ["Choice 1", "Choice 2"]
+        )
+
+        self.assertEqual(result, 1)
+        # QCheckBox should NOT have been instantiated
+        self.mock_qt.QCheckBox.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()
