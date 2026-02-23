@@ -27,10 +27,14 @@ class TestJapaneseExamplesExceptions(unittest.TestCase):
         self.mock_requests.Session.return_value = self.mock_session
         self.mock_requests.get = MagicMock()
 
+        # Mock Logging
+        self.mock_logging = MagicMock()
+
         # Patch sys.modules
         self.modules_patcher = patch.dict(sys.modules, {
             'aqt': self.mock_aqt,
-            'requests': self.mock_requests
+            'requests': self.mock_requests,
+            'logging': self.mock_logging
         })
         self.modules_patcher.start()
 
