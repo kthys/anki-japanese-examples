@@ -1,6 +1,14 @@
 from aqt import mw
 from aqt.utils import QDialog, QVBoxLayout, QLabel, QDialogButtonBox, showInfo
 from aqt.qt import QComboBox, QCheckBox, QPushButton, QHBoxLayout, QAction
+from aqt.operations import QueryOp
+
+try:
+    from PyQt6.QtCore import QTimer
+except ImportError:
+    from PyQt5.QtCore import QTimer
+
+_active_ops = set()
 
 try:
     from .i18n import _
@@ -10,6 +18,16 @@ except ImportError:
     except Exception:
         _ = lambda x: x
 
+try:
+    from . import tatoeba_data
+except ImportError:
+    import tatoeba_data
+
+try:
+    from . import batch_engine
+except ImportError:
+    import batch_engine
+
 
 class BatchDialog(QDialog):
     """Dialog for Tatoeba batch processing — adds examples to all cards in a deck."""
@@ -17,7 +35,7 @@ class BatchDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle(_("batch_dialog_title"))
-        self.resize(500, 350)
+        self.resize(500, 400)
         self.setup_ui()
 
     def setup_ui(self):
@@ -33,6 +51,7 @@ class BatchDialog(QDialog):
         lang_label = QLabel(_("batch_language_label") if _("batch_language_label") != "batch_language_label" else "Language:")
         self.language_combo = QComboBox()
         self.language_combo.addItems(["English", "French"])
+        self.language_combo.currentIndexChanged.connect(self._update_file_status)
         lang_row.addWidget(lang_label)
         lang_row.addWidget(self.language_combo)
         layout.addLayout(lang_row)
@@ -55,9 +74,40 @@ class BatchDialog(QDialog):
         deck_label = QLabel(_("batch_deck_label") if _("batch_deck_label") != "batch_deck_label" else "Deck:")
         self.deck_combo = QComboBox()
         self._populate_decks()
+        self.deck_combo.currentIndexChanged.connect(self._populate_fields)
         deck_row.addWidget(deck_label)
         deck_row.addWidget(self.deck_combo)
         layout.addLayout(deck_row)
+
+        self.deck_status_label = QLabel("")
+        self.deck_status_label.setStyleSheet("color: red;")
+        self.deck_status_label.hide()
+        layout.addWidget(self.deck_status_label)
+
+        # ── Field selectors ─────────────────────────────────────────
+        # Source field (word to look up)
+        source_row = QHBoxLayout()
+        source_label = QLabel(_("batch_source_field_label") if _("batch_source_field_label") != "batch_source_field_label" else "Source field (word):")
+        self.source_field_combo = QComboBox()
+        source_row.addWidget(source_label)
+        source_row.addWidget(self.source_field_combo)
+        layout.addLayout(source_row)
+
+        # Japanese destination field
+        jpn_row = QHBoxLayout()
+        jpn_label = QLabel(_("batch_jpn_field_label") if _("batch_jpn_field_label") != "batch_jpn_field_label" else "Japanese example field:")
+        self.jpn_field_combo = QComboBox()
+        jpn_row.addWidget(jpn_label)
+        jpn_row.addWidget(self.jpn_field_combo)
+        layout.addLayout(jpn_row)
+
+        # Translation destination field
+        trans_row = QHBoxLayout()
+        trans_label = QLabel(_("batch_trans_field_label") if _("batch_trans_field_label") != "batch_trans_field_label" else "Translation example field:")
+        self.trans_field_combo = QComboBox()
+        trans_row.addWidget(trans_label)
+        trans_row.addWidget(self.trans_field_combo)
+        layout.addLayout(trans_row)
 
         # Skip checkbox
         self.skip_checkbox = QCheckBox(_("batch_skip_existing"))
@@ -75,6 +125,10 @@ class BatchDialog(QDialog):
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
 
+        # Set initial file status and populate fields
+        self._update_file_status()
+        self._populate_fields()
+
     # ── Deck population ─────────────────────────────────────────────
 
     def _populate_decks(self):
@@ -86,15 +140,200 @@ class BatchDialog(QDialog):
         except Exception:
             pass
 
-    # ── Stub handlers (to be wired in Phase 1.2 / Phase 2) ─────────
+    # ── Field population ────────────────────────────────────────────
+
+    def _populate_fields(self):
+        """
+        Populate the 3 field selector combos from the selected deck's note type.
+
+        Reads the first note in the selected deck to discover available field
+        names. If no notes are found, the combos are cleared and a warning is
+        shown in the file status label.
+
+        Args:
+        - None (reads from self.deck_combo).
+
+        Returns:
+        - None
+        """
+        self.source_field_combo.clear()
+        self.jpn_field_combo.clear()
+        self.trans_field_combo.clear()
+        self.deck_status_label.hide()
+
+        deck_id = self.deck_combo.currentData()
+        if deck_id is None:
+            return
+
+        try:
+            note_ids = mw.col.find_notes(f"did:{deck_id}")
+            if not note_ids:
+                translated = _("batch_no_fields")
+                if translated == "batch_no_fields":
+                    translated = "No fields available. Please select a deck with notes."
+                self.deck_status_label.setText(translated)
+                self.deck_status_label.show()
+                return
+
+            note = mw.col.get_note(note_ids[0])
+            field_names = [fld["name"] for fld in note.note_type()["flds"]]
+
+            self.source_field_combo.addItems(field_names)
+            self.jpn_field_combo.addItems(field_names)
+            self.trans_field_combo.addItems(field_names)
+        except Exception:
+            pass
+
+    # ── Handlers ────────────────────────────────────────────────────
+
+    def _update_file_status(self):
+        """Updates file status UI based on currently selected language."""
+        lang = self.language_combo.currentText()
+        date_str = tatoeba_data.get_file_status(lang)
+
+        if date_str:
+            count = 0
+            # Attempt to read count from metadata
+            try:
+                import json
+                if tatoeba_data.os.path.exists(tatoeba_data.METADATA_FILE):
+                    with open(tatoeba_data.METADATA_FILE, "r", encoding="utf-8") as f:
+                        md = json.load(f)
+                        count = md.get(tatoeba_data.LANG_MAP.get(lang), {}).get("count", 0)
+            except Exception:
+                pass
+
+            translated = _("batch_file_available")
+            if translated != "batch_file_available":
+                msg = translated.format(date=date_str, count=count)
+            else:
+                msg = f"Status: Downloaded on {date_str} ({count} pairs)"
+
+            self.file_status_label.setText(msg)
+            self.run_button.setEnabled(True)
+        else:
+            self.file_status_label.setText(_("batch_file_not_downloaded"))
+            self.run_button.setEnabled(False)
 
     def _on_download(self):
-        """Stub — download logic will be implemented in Plan 1.2."""
-        showInfo("Download not yet implemented.")
+        """Downloads Tatoeba data for the selected language."""
+        self.download_button.setEnabled(False)
+        self.file_status_label.setText(_("batch_downloading") if _("batch_downloading") != "batch_downloading" else "Downloading Tatoeba data...")
+
+        # Keep it simple and blocking
+        # mw.app.processEvents() could be used here but avoid it since it can lead to crashes
+
+        lang = self.language_combo.currentText()
+        success, message = tatoeba_data.download_tatoeba_data(lang)
+
+        self.download_button.setEnabled(True)
+
+        if success:
+            self._update_file_status()
+            showInfo(message)
+        else:
+            self.file_status_label.setText(_("batch_file_not_downloaded"))
+            showInfo(message)
 
     def _on_run(self):
-        """Stub — batch processing engine will be implemented in Phase 2."""
-        showInfo("Batch processing not yet implemented.")
+        """
+        Run batch processing on the selected deck using batch_engine.run_batch.
+
+        Reads the selected field names from the 3 combo boxes, validates that
+        data is available, calls run_batch, and displays a summary report via
+        showInfo.
+
+        Args:
+        - None (reads from UI widgets).
+
+        Returns:
+        - None
+        """
+        lang = self.language_combo.currentText()
+
+        # Check data availability
+        if not tatoeba_data.is_data_available(lang):
+            translated = _("batch_no_data")
+            if translated != "batch_no_data":
+                showInfo(translated)
+            else:
+                showInfo("No Tatoeba data available. Please download data first.")
+            return
+
+        deck_id = self.deck_combo.currentData()
+        source_field = self.source_field_combo.currentText()
+        jpn_dest_field = self.jpn_field_combo.currentText()
+        trans_dest_field = self.trans_field_combo.currentText()
+        skip_existing = self.skip_checkbox.isChecked()
+
+        if not source_field or not jpn_dest_field or not trans_dest_field:
+            translated = _("batch_no_fields")
+            if translated != "batch_no_fields":
+                showInfo(translated)
+            else:
+                showInfo("No fields available. Please select a deck with notes.")
+            return
+
+        self.run_button.setEnabled(False)
+
+        def background_func(col):
+            return batch_engine.run_batch(
+                col=col,
+                deck_id=deck_id,
+                lang_label=lang,
+                source_field=source_field,
+                jpn_dest_field=jpn_dest_field,
+                trans_dest_field=trans_dest_field,
+                skip_existing=skip_existing,
+            )
+
+        def on_success(result):
+            _active_ops.remove(op)
+
+            def safe_execute(callback):
+                def check_and_run():
+                    if getattr(mw, "progress", None) and getattr(mw.progress, "busy", lambda: False)():
+                        QTimer.singleShot(100, check_and_run)
+                    else:
+                        callback()
+                check_and_run()
+
+            def show_report():
+                # Build report
+                translated_title = _("batch_report_title")
+                translated_body = _("batch_report_body")
+
+                if translated_body != "batch_report_body":
+                    report = translated_body.format(
+                        updated=result.updated,
+                        skipped_existing=result.skipped_existing,
+                        skipped_no_match=result.skipped_no_match,
+                        skipped_missing=result.skipped_missing_fields,
+                        errors=result.errors,
+                    )
+                else:
+                    report = (
+                        f"Batch processing complete.\n\n"
+                        f"Updated: {result.updated}\n"
+                        f"Skipped (already have examples): {result.skipped_existing}\n"
+                        f"Skipped (no match found): {result.skipped_no_match}\n"
+                        f"Skipped (missing fields): {result.skipped_missing_fields}\n"
+                        f"Errors: {result.errors}"
+                    )
+
+                showInfo(report)
+                self.run_button.setEnabled(True)
+
+            safe_execute(show_report)
+
+        op = QueryOp(parent=self, op=background_func, success=on_success)
+        _active_ops.add(op)
+        
+        progress_msg = _("batch_running")
+        if progress_msg == "batch_running":
+            progress_msg = "Running batch process..."
+        
+        op.with_progress(progress_msg).run_in_background()
 
 
 def register_batch_menu():
@@ -102,3 +341,4 @@ def register_batch_menu():
     action = QAction(_("batch_menu_action"), mw)
     action.triggered.connect(lambda: BatchDialog(mw).exec())
     mw.form.menuTools.addAction(action)
+
