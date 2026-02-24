@@ -21,7 +21,6 @@
     "batch_menu_action": "Tatoeba Batch Processing",
     "batch_data_section_title": "Local Data Management",
     "batch_file_not_downloaded": "Status: Not downloaded",
-    "batch_file_last_updated": "Status: Last updated {date}",
     "batch_download_button": "Download Data",
     "batch_execution_section_title": "Batch Execution",
     "batch_skip_existing": "Skip cards that already have examples",
