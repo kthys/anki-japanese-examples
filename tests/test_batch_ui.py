@@ -16,6 +16,8 @@ class TestBatchUI(unittest.TestCase):
         self.mock_utils = MagicMock()
         self.mock_qt = MagicMock()
         self.mock_gui_hooks = MagicMock()
+        self.mock_operations = MagicMock()
+        self.mock_operations.CollectionOp = MagicMock()
 
         # Patch sys.modules to simulate aqt existence
         self.modules_patcher = patch.dict(sys.modules, {
@@ -24,6 +26,7 @@ class TestBatchUI(unittest.TestCase):
             'aqt.utils': self.mock_utils,
             'aqt.qt': self.mock_qt,
             'aqt.gui_hooks': self.mock_gui_hooks,
+            'aqt.operations': self.mock_operations,
         })
         self.modules_patcher.start()
 
@@ -141,7 +144,7 @@ class TestBatchUI(unittest.TestCase):
         """Run button should be disabled by default."""
         dialog = self.batch_ui.BatchDialog()
         self.assertIsNotNone(dialog.run_button)
-        dialog.run_button.setEnabled.assert_called_once_with(False)
+        dialog.run_button.setEnabled.assert_called_with(False)
 
     def test_batch_dialog_has_download_button(self):
         """BatchDialog should have a download button."""

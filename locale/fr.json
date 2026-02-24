@@ -26,5 +26,18 @@
     "batch_execution_section_title": "Exécution en lot",
     "batch_skip_existing": "Ignorer les cartes ayant déjà des exemples",
     "batch_run_button": "Lancer le traitement en lot",
-    "batch_dialog_title": "Traitement en lot Tatoeba"
+    "batch_dialog_title": "Traitement en lot Tatoeba",
+    "batch_downloading": "Téléchargement des données Tatoeba...",
+    "batch_download_success": "Téléchargement terminé. {count} paires de phrases chargées pour {lang}.",
+    "batch_download_error": "Échec du téléchargement : {error}",
+    "batch_file_available": "Statut : Téléchargé le {date} ({count} paires)",
+    "batch_language_label": "Langue :",
+    "batch_deck_label": "Deck :",
+    "batch_source_field_label": "Champ source (mot) :",
+    "batch_jpn_field_label": "Champ exemple japonais :",
+    "batch_trans_field_label": "Champ exemple traduction :",
+    "batch_report_title": "Rapport de traitement en lot",
+    "batch_report_body": "Traitement en lot terminé.\n\nMis à jour : {updated}\nIgnorés (exemples existants) : {skipped_existing}\nIgnorés (aucune correspondance) : {skipped_no_match}\nIgnorés (champs manquants) : {skipped_missing}\nErreurs : {errors}",
+    "batch_no_data": "Aucune donnée Tatoeba disponible. Veuillez d'abord télécharger les données.",
+    "batch_no_fields": "Aucun champ disponible. Veuillez sélectionner un deck contenant des notes."
 }
