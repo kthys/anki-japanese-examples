@@ -34,7 +34,7 @@
     "batch_deck_label": "Deck:",
     "batch_source_field_label": "Source field (word):",
     "batch_jpn_field_label": "Japanese example field:",
-    "batch_trans_field_label": "Translation example field:",
+    "batch_trans_field_label": "Translated example field:",
     "batch_report_title": "Batch Processing Report",
     "batch_report_body": "Batch processing complete.\n\nUpdated: {updated}\nSkipped (already have examples): {skipped_existing}\nSkipped (no match found): {skipped_no_match}\nSkipped (missing fields): {skipped_missing}\nErrors: {errors}",
     "batch_no_data": "No Tatoeba data available. Please download data first.",
