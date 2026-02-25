@@ -33,12 +33,32 @@ class BatchDialog(QDialog):
     """Dialog for Tatoeba batch processing — adds examples to all cards in a deck."""
 
     def __init__(self, parent=None):
+        """
+        Initialize the BatchDialog.
+
+        Args:
+        - parent (QWidget): The parent widget, typically the Anki main window. Default is None.
+
+        Returns:
+        - None
+        """
         super().__init__(parent)
         self.setWindowTitle(_("batch_dialog_title"))
         self.resize(500, 400)
         self.setup_ui()
 
     def setup_ui(self):
+        """
+        Set up the user interface for the dialog.
+
+        Creates and lays out the widgets for the data management and execution sections.
+
+        Args:
+        - None
+
+        Returns:
+        - None
+        """
         layout = QVBoxLayout()
         self.setLayout(layout)
 
@@ -132,7 +152,17 @@ class BatchDialog(QDialog):
     # ── Deck population ─────────────────────────────────────────────
 
     def _populate_decks(self):
-        """Populate deck combo from Anki collection."""
+        """
+        Populate deck combo from Anki collection.
+
+        Reads all deck names from the current Anki collection and adds them to the deck selector.
+
+        Args:
+        - None
+
+        Returns:
+        - None
+        """
         try:
             decks = mw.col.decks.all_names_and_ids()
             for deck in decks:
@@ -187,7 +217,17 @@ class BatchDialog(QDialog):
     # ── Handlers ────────────────────────────────────────────────────
 
     def _update_file_status(self):
-        """Updates file status UI based on currently selected language."""
+        """
+        Updates file status UI based on currently selected language.
+
+        Reads the downloaded file status and metadata count, and shows it in the status label.
+
+        Args:
+        - None (reads from UI widgets).
+
+        Returns:
+        - None
+        """
         lang = self.language_combo.currentText()
         date_str = tatoeba_data.get_file_status(lang)
 
@@ -216,24 +256,57 @@ class BatchDialog(QDialog):
             self.run_button.setEnabled(False)
 
     def _on_download(self):
-        """Downloads Tatoeba data for the selected language."""
+        """
+        Downloads Tatoeba data for the selected language in the background.
+
+        Disables the download button, shows a progress indicator, and enables
+        it again when the download is finished.
+
+        Args:
+        - None (reads from UI widgets).
+
+        Returns:
+        - None
+        """
         self.download_button.setEnabled(False)
         self.file_status_label.setText(_("batch_downloading") if _("batch_downloading") != "batch_downloading" else "Downloading Tatoeba data...")
 
-        # Keep it simple and blocking
-        # mw.app.processEvents() could be used here but avoid it since it can lead to crashes
-
         lang = self.language_combo.currentText()
-        success, message = tatoeba_data.download_tatoeba_data(lang)
 
-        self.download_button.setEnabled(True)
+        def background_func(col):
+            return tatoeba_data.download_tatoeba_data(lang)
 
-        if success:
-            self._update_file_status()
-            showInfo(message)
-        else:
-            self.file_status_label.setText(_("batch_file_not_downloaded"))
-            showInfo(message)
+        def on_success(result):
+            _active_ops.remove(op)
+
+            def safe_execute(callback):
+                def check_and_run():
+                    if getattr(mw, "progress", None) and getattr(mw.progress, "busy", lambda: False)():
+                        QTimer.singleShot(100, check_and_run)
+                    else:
+                        callback()
+                check_and_run()
+
+            def finish_download():
+                self.download_button.setEnabled(True)
+                success, message = result
+                if success:
+                    self._update_file_status()
+                    showInfo(message)
+                else:
+                    self.file_status_label.setText(_("batch_file_not_downloaded"))
+                    showInfo(message)
+
+            safe_execute(finish_download)
+
+        op = QueryOp(parent=self, op=background_func, success=on_success)
+        _active_ops.add(op)
+        
+        progress_msg = _("batch_downloading")
+        if progress_msg == "batch_downloading":
+            progress_msg = "Downloading Tatoeba data..."
+        
+        op.with_progress(progress_msg).run_in_background()
 
     def _on_run(self):
         """
@@ -337,7 +410,17 @@ class BatchDialog(QDialog):
 
 
 def register_batch_menu():
-    """Register the 'Tatoeba Batch Processing' action in Tools menu."""
+    """
+    Register the 'Tatoeba Batch Processing' action in Tools menu.
+
+    Adds a menu item to the Anki tools menu that opens the BatchDialog.
+
+    Args:
+    - None
+
+    Returns:
+    - None
+    """
     action = QAction(_("batch_menu_action"), mw)
     action.triggered.connect(lambda: BatchDialog(mw).exec())
     mw.form.menuTools.addAction(action)
