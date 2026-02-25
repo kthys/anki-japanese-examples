@@ -139,11 +139,12 @@ def build_sqlite_index(pairs_tsv_path: str, db_path: str) -> int:
 
 def search_word(db_path: str, word: str) -> list[tuple[str, str]]:
     """
-    Search the SQLite index for sentences containing an exact token match.
+    Search the SQLite index for sentences containing the word.
 
-    Performs a strict word-boundary search: the word must appear as a complete
-    token in the tokenized sentence. For example, searching for '火' will NOT
-    match '花火' because '花火' is a single kanji-run token.
+    Performs a strict boundary search for kanji roots, but allows kana
+    inflections (e.g., searching '負ける' will correctly find the sentence
+    '試験に負けるな。'). For pure kanji queries like '火', it strictly
+    avoids matching '花火'.
 
     Args:
     - db_path (str): Path to the SQLite index database.
@@ -156,15 +157,32 @@ def search_word(db_path: str, word: str) -> list[tuple[str, str]]:
     if not os.path.exists(db_path):
         return []
 
+    tokens = tokenize_japanese(word)
+    if not tokens:
+        return []
+
+    # Heuristic: the first kanji token is the best index key because kanji
+    # are semantic and highly specific. If no kanji, use the longest token.
+    kanji_tokens = [t for t in tokens if re.search(r'[\u4e00-\u9fff\u3400-\u4dbf]', t)]
+    if kanji_tokens:
+        primary_token = kanji_tokens[0]
+        # For kanji, exact match respects strict boundaries for the root
+        token_query = "w.word = ?"
+    else:
+        primary_token = max(tokens, key=len)
+        # For kana, use prefix match to catch inflections
+        token_query = "w.word LIKE ? || '%'"
+
     try:
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
-        cur.execute("""
+        cur.execute(f"""
             SELECT DISTINCT s.jpn_text, s.trans_text
             FROM words w
             JOIN sentences s ON w.sentence_id = s.id
-            WHERE w.word = ?
-        """, (word,))
+            WHERE {token_query}
+              AND s.jpn_text LIKE ?
+        """, (primary_token, f"%{word}%"))
         results = cur.fetchall()
         conn.close()
         return results
