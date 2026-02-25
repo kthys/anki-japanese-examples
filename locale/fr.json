@@ -34,7 +34,7 @@
     "batch_deck_label": "Deck :",
     "batch_source_field_label": "Champ source (mot) :",
     "batch_jpn_field_label": "Champ exemple japonais :",
-    "batch_trans_field_label": "Champ exemple traduction :",
+    "batch_trans_field_label": "Champ exemple traduit :",
     "batch_report_title": "Rapport de traitement en lot",
     "batch_report_body": "Traitement en lot terminé.\n\nMis à jour : {updated}\nIgnorés (exemples existants) : {skipped_existing}\nIgnorés (aucune correspondance) : {skipped_no_match}\nIgnorés (champs manquants) : {skipped_missing}\nErreurs : {errors}",
     "batch_no_data": "Aucune donnée Tatoeba disponible. Veuillez d'abord télécharger les données.",

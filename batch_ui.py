@@ -168,7 +168,7 @@ class BatchDialog(QDialog):
 
         # Translation destination field
         trans_row = QHBoxLayout()
-        trans_label = QLabel(_("batch_trans_field_label") if _("batch_trans_field_label") != "batch_trans_field_label" else "Translation example field:")
+        trans_label = QLabel(_("batch_trans_field_label") if _("batch_trans_field_label") != "batch_trans_field_label" else "Translated example field:")
         self.trans_field_combo = QComboBox()
         trans_row.addWidget(trans_label)
         trans_row.addWidget(self.trans_field_combo)
