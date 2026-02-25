@@ -228,6 +228,20 @@ class TestTatoebaData(unittest.TestCase):
         results = tatoeba_data.search_word("/nonexistent/path.db", "猫")
         self.assertEqual(results, [])
 
+    def test_download_tatoeba_data_calls_progress_callback(self):
+        """progress_callback should be called at least 5 times during download."""
+        mock_response = MagicMock()
+        mock_response.content = bz2.compress(b"mock tsv content")
+        mock_response.raise_for_status.return_value = None
+
+        callback = MagicMock()
+
+        with patch('tatoeba_data.requests.get', return_value=mock_response):
+            with patch('tatoeba_data.build_pairs_tsv', return_value="1\t猫\t100\tcat\n"):
+                tatoeba_data.download_tatoeba_data("English", progress_callback=callback)
+
+        self.assertGreaterEqual(callback.call_count, 5)
+
 if __name__ == '__main__':
     unittest.main()
 

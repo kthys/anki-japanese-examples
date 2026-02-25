@@ -1,6 +1,6 @@
 from aqt import mw
 from aqt.utils import QDialog, QVBoxLayout, QLabel, QDialogButtonBox, showInfo
-from aqt.qt import QComboBox, QCheckBox, QPushButton, QHBoxLayout, QAction
+from aqt.qt import QComboBox, QCheckBox, QPushButton, QHBoxLayout, QAction, QTextEdit, QProgressBar
 from aqt.operations import QueryOp
 
 try:
@@ -27,6 +27,51 @@ try:
     from . import batch_engine
 except ImportError:
     import batch_engine
+
+
+class DownloadProgressDialog(QDialog):
+    """Modal-less dialog that displays an indeterminate progress bar and a read-only text log.
+
+    Shown during the Tatoeba data download so the user can see each step
+    as it happens instead of a generic spinner.
+    """
+
+    def __init__(self, parent=None):
+        """
+        Initialize the DownloadProgressDialog.
+
+        Args:
+        - parent (QWidget): The parent widget. Default is None.
+
+        Returns:
+        - None
+        """
+        super().__init__(parent)
+        self.setWindowTitle(_("batch_progress_title"))
+        self.resize(400, 250)
+
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)  # indeterminate
+        layout.addWidget(self.progress_bar)
+
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        layout.addWidget(self.log_text)
+
+    def append_log(self, message: str):
+        """
+        Append a message line to the read-only text log.
+
+        Args:
+        - message (str): The status message to append.
+
+        Returns:
+        - None
+        """
+        self.log_text.append(message)
 
 
 class BatchDialog(QDialog):
@@ -259,8 +304,9 @@ class BatchDialog(QDialog):
         """
         Downloads Tatoeba data for the selected language in the background.
 
-        Disables the download button, shows a progress indicator, and enables
-        it again when the download is finished.
+        Opens a DownloadProgressDialog with an indeterminate progress bar and
+        a read-only text log, then runs the download via QueryOp.  Each step
+        in download_tatoeba_data calls back to append a log line.
 
         Args:
         - None (reads from UI widgets).
@@ -273,8 +319,15 @@ class BatchDialog(QDialog):
 
         lang = self.language_combo.currentText()
 
+        # Open custom progress dialog
+        self._download_dlg = DownloadProgressDialog(self)
+        self._download_dlg.show()
+
+        def progress_callback(msg):
+            mw.taskman.run_on_main(lambda: self._download_dlg.append_log(msg))
+
         def background_func(col):
-            return tatoeba_data.download_tatoeba_data(lang)
+            return tatoeba_data.download_tatoeba_data(lang, progress_callback=progress_callback)
 
         def on_success(result):
             _active_ops.remove(op)
@@ -288,6 +341,7 @@ class BatchDialog(QDialog):
                 check_and_run()
 
             def finish_download():
+                self._download_dlg.close()
                 self.download_button.setEnabled(True)
                 success, message = result
                 if success:
@@ -301,12 +355,7 @@ class BatchDialog(QDialog):
 
         op = QueryOp(parent=self, op=background_func, success=on_success)
         _active_ops.add(op)
-        
-        progress_msg = _("batch_downloading")
-        if progress_msg == "batch_downloading":
-            progress_msg = "Downloading Tatoeba data..."
-        
-        op.with_progress(progress_msg).run_in_background()
+        op.run_in_background()
 
     def _on_run(self):
         """
