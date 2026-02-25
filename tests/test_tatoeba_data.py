@@ -223,6 +223,38 @@ class TestTatoebaData(unittest.TestCase):
         # Clean up
         os.remove(db_path)
 
+    def test_search_word_mixed_token_and_inflection(self):
+        """search_word must support mixed tokens and inflections (e.g. 負ける)."""
+        tsv_path = os.path.join(self.temp_dir, "inflection_pairs.tsv")
+        db_path = os.path.join(self.temp_dir, "inflection_index.db")
+
+        with open(tsv_path, "w", encoding="utf-8") as f:
+            f.write("1\t試験に負けるな。\t100\tDon't lose the exam.\n")
+            f.write("2\tもう負けました。\t101\tI gave up.\n")
+            f.write("3\t間もなく電車が来ます。\t102\tTrain comes shortly.\n")
+            f.write("4\tありがとうございます。\t103\tThank you.\n")
+
+        tatoeba_data.build_sqlite_index(tsv_path, db_path)
+
+        # 負ける should match 負けるな but not 負けました
+        results = tatoeba_data.search_word(db_path, "負ける")
+        jpn_texts = [r[0] for r in results]
+        self.assertIn("試験に負けるな。", jpn_texts)
+        self.assertNotIn("もう負けました。", jpn_texts)
+
+        # 間もなく should match (mixed tokens '間' and 'もなく')
+        results = tatoeba_data.search_word(db_path, "間もなく")
+        jpn_texts = [r[0] for r in results]
+        self.assertIn("間もなく電車が来ます。", jpn_texts)
+
+        # ありがとう should match ありがとうございます (kana prefix match)
+        results = tatoeba_data.search_word(db_path, "ありがとう")
+        jpn_texts = [r[0] for r in results]
+        self.assertIn("ありがとうございます。", jpn_texts)
+
+        # Clean up
+        os.remove(db_path)
+
     def test_search_word_missing_db(self):
         """search_word should return empty list for nonexistent DB."""
         results = tatoeba_data.search_word("/nonexistent/path.db", "猫")
