@@ -38,5 +38,11 @@
     "batch_report_title": "Rapport de traitement en lot",
     "batch_report_body": "Traitement en lot terminé.\n\nMis à jour : {updated}\nIgnorés (exemples existants) : {skipped_existing}\nIgnorés (aucune correspondance) : {skipped_no_match}\nIgnorés (champs manquants) : {skipped_missing}\nErreurs : {errors}",
     "batch_no_data": "Aucune donnée Tatoeba disponible. Veuillez d'abord télécharger les données.",
-    "batch_no_fields": "Aucun champ disponible. Veuillez sélectionner un deck contenant des notes."
+    "batch_no_fields": "Aucun champ disponible. Veuillez sélectionner un deck contenant des notes.",
+    "batch_progress_title": "Téléchargement des données",
+    "batch_step_fetch_jpn": "Récupération des phrases japonaises…",
+    "batch_step_fetch_target": "Récupération des phrases {lang}…",
+    "batch_step_fetch_links": "Récupération des liens…",
+    "batch_step_build_tsv": "Construction des paires de phrases…",
+    "batch_step_build_index": "Construction de l'index de recherche…"
 }

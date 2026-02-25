@@ -266,18 +266,27 @@ def download_tatoeba_data(lang_label: str, progress_callback=None) -> tuple[bool
         urls = get_download_urls(lang_code)
         
         if progress_callback:
-            progress_callback(_("batch_downloading") if _("batch_downloading") != "batch_downloading" else "Downloading Tatoeba data...")
-            
+            progress_callback(_("batch_step_fetch_jpn"))
         jpn_content = download_and_extract_bz2(urls["jpn_sentences"])
+
+        if progress_callback:
+            progress_callback(_("batch_step_fetch_target").format(lang=lang_label))
         target_content = download_and_extract_bz2(urls["target_sentences"])
+
+        if progress_callback:
+            progress_callback(_("batch_step_fetch_links"))
         links_content = download_and_extract_bz2(urls["links"])
         
+        if progress_callback:
+            progress_callback(_("batch_step_build_tsv"))
         pairs_tsv = build_pairs_tsv(jpn_content, target_content, links_content)
         
         output_file = get_data_file_path(lang_code)
         with open(output_file, "w", encoding="utf-8") as f:
             f.write(pairs_tsv)
 
+        if progress_callback:
+            progress_callback(_("batch_step_build_index"))
         # Build SQLite index for strict word-boundary matching
         db_path = get_db_path(lang_code)
         build_sqlite_index(output_file, db_path)

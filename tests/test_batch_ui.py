@@ -171,6 +171,14 @@ class TestBatchUI(unittest.TestCase):
         self.batch_ui.register_batch_menu()
         self.mock_mw.form.menuTools.addAction.assert_called_once()
 
+    # ── DownloadProgressDialog tests ──────────────────────────────────
+
+    def test_download_progress_dialog_has_progress_bar_and_log(self):
+        """DownloadProgressDialog should have progress_bar and log_text attributes."""
+        dialog = self.batch_ui.DownloadProgressDialog()
+        self.assertIsNotNone(dialog.progress_bar)
+        self.assertIsNotNone(dialog.log_text)
+
 
 if __name__ == '__main__':
     unittest.main()
