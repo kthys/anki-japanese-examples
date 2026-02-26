@@ -175,7 +175,7 @@ def add_example_manually_dialog(editor):
         target_lang = deck_prefs[str(deck_id)]
 
     if not target_lang:
-        # User choses where to get the examples from
+        # User chooses where to get the examples from
         result = create_custom_dialog(
             _("select_translation_language_dialog"),
             ['English', 'French'],
@@ -246,7 +246,7 @@ def add_example_manually_dialog(editor):
                     return
 
                 def show_result_dialog():
-                    # User choses which example to add
+                    # User chooses which example to add
                     # We pass the parent window explicitly to avoid attaching to the progress dialog
                     # Use editor.parentWindow (Browser/Add window) as parent.
                     example_picker_index = create_custom_dialog(
