@@ -6,6 +6,7 @@ import datetime
 import json
 import sqlite3
 import re
+from typing import Optional
 
 try:
     from aqt import mw
@@ -347,7 +348,7 @@ def download_tatoeba_data(lang_label: str, progress_callback=None) -> tuple[bool
         logging.error(f"Error downloading Tatoeba data: {e}", exc_info=True)
         return False, error_msg
 
-def load_index(lang_label: str) -> dict | None:
+def load_index(lang_label: str) -> Optional[dict]:
     """
     Loads the processed TSV into an in-memory dict.
 
@@ -386,7 +387,7 @@ def load_index(lang_label: str) -> dict | None:
         logging.error(f"Error loading index: {e}", exc_info=True)
         return None
 
-def get_file_status(lang_label: str) -> str | None:
+def get_file_status(lang_label: str) -> Optional[str]:
     """
     Returns the download date string from metadata.
 
