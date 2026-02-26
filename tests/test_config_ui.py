@@ -121,6 +121,21 @@ class TestConfigUI(unittest.TestCase):
         self.assertIsNotNone(dialog.config)
         self.assertEqual(dialog.config["deck_preferences"], {})
 
+    # ── on_config ───────────────────────────────────────────────────
+
+    def test_on_config_instantiates_and_executes_dialog(self):
+        """Should instantiate ConfigDialog with the active window and call exec()."""
+        mock_active_window = MagicMock()
+        self.mock_mw.app.activeWindow.return_value = mock_active_window
+
+        with patch('config_ui.ConfigDialog') as MockDialog:
+            mock_dialog_instance = MockDialog.return_value
+
+            self.config_ui.on_config()
+
+            MockDialog.assert_called_once_with(mock_active_window)
+            mock_dialog_instance.exec.assert_called_once()
+
 
 if __name__ == '__main__':
     unittest.main()
