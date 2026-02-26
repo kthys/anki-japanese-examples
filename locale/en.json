@@ -18,7 +18,7 @@
     "translation_field_label": "Translation Field Name:",
     "deck_preferences_reset": "Deck preferences have been reset.",
     "deck_preference_info_tooltip": "This preference can be reset in the addon's settings.",
-    "batch_menu_action": "Tatoeba Batch Processing",
+    "batch_menu_action": "Batch process examples",
     "batch_data_section_title": "Local Data Management",
     "batch_file_not_downloaded": "Status: Not downloaded",
     "batch_download_button": "Download Data",

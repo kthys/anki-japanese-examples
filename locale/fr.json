@@ -18,7 +18,7 @@
     "translation_field_label": "Nom du champ Traduction :",
     "deck_preferences_reset": "Les préférences de paquet ont été réinitialisées.",
     "deck_preference_info_tooltip": "Cette préférence peut être réinitialisée dans les paramètres de l'addon.",
-    "batch_menu_action": "Traitement en lot Tatoeba",
+    "batch_menu_action": "Traiter les exemples en lot",
     "batch_data_section_title": "Gestion des données locales",
     "batch_file_not_downloaded": "Statut : Non téléchargé",
     "batch_download_button": "Télécharger les données",
