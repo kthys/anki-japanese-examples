@@ -1,5 +1,11 @@
 # Japanese Examples - Changelog
 
+## v1.3.3 Update
+- **Improvement:** Optimized batch processing performance with faster database lookups.
+- **Fix:** Corrected various typos in the UI and French locales.
+
+**Thank you for using the Japanese Examples add-on!**
+
 ## v1.3.0 Update
 Batch processing is here ! You can now go in the "Tools" on the menu at the top of the main window and select "Batch process examples" to add examples to multiple cards at once.
 
