@@ -54,6 +54,14 @@ class TestCleanWord(unittest.TestCase):
 class TestRunBatch(unittest.TestCase):
     """Tests for the run_batch function."""
 
+    def setUp(self):
+        self.temp_db_fd, self.temp_db_path = tempfile.mkstemp(suffix=".db")
+        os.close(self.temp_db_fd)
+        
+    def tearDown(self):
+        if os.path.exists(self.temp_db_path):
+            os.remove(self.temp_db_path)
+
     def _make_mock_note(self, fields_dict, field_order=None):
         """Helper to create a mock Anki note.
 
@@ -92,7 +100,7 @@ class TestRunBatch(unittest.TestCase):
     def test_run_batch_updates_notes(self, mock_td):
         """run_batch should update notes when matches are found."""
         mock_td.LANG_MAP = {"English": "eng"}
-        mock_td.get_db_path.return_value = "/fake/db.db"
+        mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [("猫が好きです。", "I like cats.")]
 
         field_order = ["Word", "ExampleJapanese", "ExampleTranslated"]
@@ -119,7 +127,7 @@ class TestRunBatch(unittest.TestCase):
     def test_run_batch_skips_existing(self, mock_td):
         """run_batch should skip notes that already have examples when skip_existing=True."""
         mock_td.LANG_MAP = {"English": "eng"}
-        mock_td.get_db_path.return_value = "/fake/db.db"
+        mock_td.get_db_path.return_value = self.temp_db_path
 
         field_order = ["Word", "ExampleJapanese", "ExampleTranslated"]
         note = self._make_mock_note(
@@ -142,7 +150,7 @@ class TestRunBatch(unittest.TestCase):
     def test_run_batch_no_skip_when_disabled(self, mock_td):
         """run_batch should overwrite existing examples when skip_existing=False."""
         mock_td.LANG_MAP = {"English": "eng"}
-        mock_td.get_db_path.return_value = "/fake/db.db"
+        mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [("新しい例。", "New example.")]
 
         field_order = ["Word", "ExampleJapanese", "ExampleTranslated"]
@@ -165,7 +173,7 @@ class TestRunBatch(unittest.TestCase):
     def test_run_batch_no_match(self, mock_td):
         """run_batch should count notes with no match as skipped_no_match."""
         mock_td.LANG_MAP = {"English": "eng"}
-        mock_td.get_db_path.return_value = "/fake/db.db"
+        mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = []
 
         field_order = ["Word", "ExampleJapanese", "ExampleTranslated"]
@@ -188,7 +196,7 @@ class TestRunBatch(unittest.TestCase):
     def test_run_batch_missing_source_field(self, mock_td):
         """run_batch should skip notes missing the source field."""
         mock_td.LANG_MAP = {"English": "eng"}
-        mock_td.get_db_path.return_value = "/fake/db.db"
+        mock_td.get_db_path.return_value = self.temp_db_path
 
         field_order = ["OtherField", "ExampleJapanese", "ExampleTranslated"]
         note = self._make_mock_note(
@@ -225,7 +233,7 @@ class TestRunBatch(unittest.TestCase):
     def test_run_batch_selects_random_match(self, mock_choice, mock_td):
         """run_batch should use random.choice when multiple matches exist."""
         mock_td.LANG_MAP = {"English": "eng"}
-        mock_td.get_db_path.return_value = "/fake/db.db"
+        mock_td.get_db_path.return_value = self.temp_db_path
         matches = [("例文A。", "Example A."), ("例文B。", "Example B.")]
         mock_td.search_word.return_value = matches
         mock_choice.return_value = ("例文B。", "Example B.")
