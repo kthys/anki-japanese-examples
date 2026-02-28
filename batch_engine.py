@@ -2,6 +2,8 @@ import re
 import html
 import random
 import logging
+import sqlite3
+import os
 from dataclasses import dataclass, field
 
 try:
@@ -96,53 +98,62 @@ def run_batch(
     # Get all note IDs in the deck
     note_ids = col.find_notes(f"did:{deck_id}")
 
-    for nid in note_ids:
-        try:
-            note = col.get_note(nid)
-            field_names = [fld["name"] for fld in note.note_type()["flds"]]
+    db_path = tatoeba_data.get_db_path(lang_code)
+    if not os.path.exists(db_path):
+        logger.error(f"Database not found at {db_path}")
+        return result
 
-            # Check that required fields exist on this note type
-            if source_field not in field_names:
-                result.skipped_missing_fields += 1
-                continue
-            if jpn_dest_field not in field_names or trans_dest_field not in field_names:
-                result.skipped_missing_fields += 1
-                continue
+    conn = sqlite3.connect(db_path)
+    try:
+        for nid in note_ids:
+            try:
+                note = col.get_note(nid)
+                field_names = [fld["name"] for fld in note.note_type()["flds"]]
 
-            # Read source word
-            source_idx = field_names.index(source_field)
-            raw_word = note.fields[source_idx].strip()
-            word = clean_word(raw_word)
-            if not word:
-                result.skipped_missing_fields += 1
-                continue
-
-            # Check skip_existing
-            jpn_idx = field_names.index(jpn_dest_field)
-            trans_idx = field_names.index(trans_dest_field)
-
-            if skip_existing:
-                if note.fields[jpn_idx].strip() and note.fields[trans_idx].strip():
-                    result.skipped_existing += 1
+                # Check that required fields exist on this note type
+                if source_field not in field_names:
+                    result.skipped_missing_fields += 1
+                    continue
+                if jpn_dest_field not in field_names or trans_dest_field not in field_names:
+                    result.skipped_missing_fields += 1
                     continue
 
-            # Search for matches
-            matches = tatoeba_data.search_word(db_path, word)
-            if not matches:
-                result.skipped_no_match += 1
-                continue
+                # Read source word
+                source_idx = field_names.index(source_field)
+                raw_word = note.fields[source_idx].strip()
+                word = clean_word(raw_word)
+                if not word:
+                    result.skipped_missing_fields += 1
+                    continue
 
-            # Select a random match
-            jpn_text, trans_text = random.choice(matches)
+                # Check skip_existing
+                jpn_idx = field_names.index(jpn_dest_field)
+                trans_idx = field_names.index(trans_dest_field)
 
-            # Write HTML-escaped results
-            note.fields[jpn_idx] = html.escape(jpn_text)
-            note.fields[trans_idx] = html.escape(trans_text)
-            col.update_note(note)
-            result.updated += 1
+                if skip_existing:
+                    if note.fields[jpn_idx].strip() and note.fields[trans_idx].strip():
+                        result.skipped_existing += 1
+                        continue
 
-        except Exception as e:
-            logger.error(f"Error processing note {nid}: {e}", exc_info=True)
-            result.errors += 1
+                # Search for matches
+                matches = tatoeba_data.search_word(db_path, word, conn=conn)
+                if not matches:
+                    result.skipped_no_match += 1
+                    continue
+
+                # Select a random match
+                jpn_text, trans_text = random.choice(matches)
+
+                # Write HTML-escaped results
+                note.fields[jpn_idx] = html.escape(jpn_text)
+                note.fields[trans_idx] = html.escape(trans_text)
+                col.update_note(note)
+                result.updated += 1
+
+            except Exception as e:
+                logger.error(f"Error processing note {nid}: {e}", exc_info=True)
+                result.errors += 1
+    finally:
+        conn.close()
 
     return result

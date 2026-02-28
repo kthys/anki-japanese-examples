@@ -138,7 +138,7 @@ def build_sqlite_index(pairs_tsv_path: str, db_path: str) -> int:
     conn.close()
     return count
 
-def search_word(db_path: str, word: str) -> list[tuple[str, str]]:
+def search_word(db_path: str, word: str, conn: Optional[sqlite3.Connection] = None) -> list[tuple[str, str]]:
     """
     Search the SQLite index for sentences containing the word.
 
@@ -150,6 +150,7 @@ def search_word(db_path: str, word: str) -> list[tuple[str, str]]:
     Args:
     - db_path (str): Path to the SQLite index database.
     - word (str): The Japanese word to search for.
+    - conn (Optional[sqlite3.Connection]): An optional active database connection to reuse.
 
     Returns:
     - A list of (jpn_text, trans_text) tuples for all matching sentences.
@@ -175,8 +176,8 @@ def search_word(db_path: str, word: str) -> list[tuple[str, str]]:
         token_query = "w.word LIKE ? || '%'"
 
     try:
-        conn = sqlite3.connect(db_path)
-        cur = conn.cursor()
+        local_conn = conn if conn is not None else sqlite3.connect(db_path)
+        cur = local_conn.cursor()
         cur.execute(f"""
             SELECT DISTINCT s.jpn_text, s.trans_text
             FROM words w
@@ -185,7 +186,8 @@ def search_word(db_path: str, word: str) -> list[tuple[str, str]]:
               AND s.jpn_text LIKE ?
         """, (primary_token, f"%{word}%"))
         results = cur.fetchall()
-        conn.close()
+        if conn is None:
+            local_conn.close()
         return results
     except Exception as e:
         logging.error(f"Error searching SQLite index: {e}", exc_info=True)
