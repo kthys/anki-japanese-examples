@@ -8,9 +8,7 @@ Japanese Examples is a plugin for the Anki flashcard software that adds example 
 ![Usage example](https://github.com/kthys/anki-japanese-examples/assets/32138080/7f7e758b-48da-4c33-916a-8614f46c7c68)
 
 ### Batch Addition
-<!-- TODO: Add video demonstrating batch addition here -->
-[//]: # (Add video link below this comment)
-![Batch Addition Video Placeholder](https://placehold.co/600x400?text=Batch+Addition+Video+Placeholder)
+![Batch Addition example](https://github.com/user-attachments/assets/1c8e4e22-d9af-4919-8242-25c206198591)
 
 ## Features
 
