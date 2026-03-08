@@ -56,9 +56,9 @@ class TestConfigUI(unittest.TestCase):
         self.mock_qt.QLineEdit = MagicMock()
 
         # Import the module under test
-        if 'config_ui' in sys.modules:
-            del sys.modules['config_ui']
-        import config_ui
+        if 'src.ui.config_ui' in sys.modules:
+            del sys.modules['src.ui.config_ui']
+        import src.ui.config_ui as config_ui
         self.config_ui = config_ui
 
     def tearDown(self):
@@ -128,7 +128,7 @@ class TestConfigUI(unittest.TestCase):
         mock_active_window = MagicMock()
         self.mock_mw.app.activeWindow.return_value = mock_active_window
 
-        with patch('config_ui.ConfigDialog') as MockDialog:
+        with patch('src.ui.config_ui.ConfigDialog') as MockDialog:
             mock_dialog_instance = MockDialog.return_value
 
             self.config_ui.on_config()

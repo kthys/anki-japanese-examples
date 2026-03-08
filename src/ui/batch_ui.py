@@ -11,22 +11,22 @@ except ImportError:
 _active_ops = set()
 
 try:
-    from .i18n import _
+    from ..utils.i18n import _
 except ImportError:
     try:
-        from i18n import _
+        from src.utils.i18n import _
     except Exception:
         _ = lambda x: x
 
 try:
-    from . import tatoeba_data
+    from ..core import tatoeba_data
 except ImportError:
-    import tatoeba_data
+    from src.core import tatoeba_data
 
 try:
-    from . import batch_engine
+    from ..core import batch_engine
 except ImportError:
-    import batch_engine
+    from src.core import batch_engine
 
 
 class DownloadProgressDialog(QDialog):
@@ -113,9 +113,10 @@ class BatchDialog(QDialog):
 
         # Language selector
         lang_row = QHBoxLayout()
-        lang_label = QLabel(_("batch_language_label") if _("batch_language_label") != "batch_language_label" else "Language:")
+        lang_label = QLabel(_("batch_language_label"))
         self.language_combo = QComboBox()
-        self.language_combo.addItems(["English", "French"])
+        self.language_combo.addItem(_("batch_language_english"), "English")
+        self.language_combo.addItem(_("batch_language_french"), "French")
         self.language_combo.currentIndexChanged.connect(self._update_file_status)
         lang_row.addWidget(lang_label)
         lang_row.addWidget(self.language_combo)
@@ -136,7 +137,7 @@ class BatchDialog(QDialog):
 
         # Deck selector
         deck_row = QHBoxLayout()
-        deck_label = QLabel(_("batch_deck_label") if _("batch_deck_label") != "batch_deck_label" else "Deck:")
+        deck_label = QLabel(_("batch_deck_label"))
         self.deck_combo = QComboBox()
         self._populate_decks()
         self.deck_combo.currentIndexChanged.connect(self._populate_fields)
@@ -152,27 +153,44 @@ class BatchDialog(QDialog):
         # ── Field selectors ─────────────────────────────────────────
         # Source field (word to look up)
         source_row = QHBoxLayout()
-        source_label = QLabel(_("batch_source_field_label") if _("batch_source_field_label") != "batch_source_field_label" else "Source field (word):")
+        source_label = QLabel(_("batch_source_field_label"))
         self.source_field_combo = QComboBox()
         source_row.addWidget(source_label)
         source_row.addWidget(self.source_field_combo)
         layout.addLayout(source_row)
 
-        # Japanese destination field
-        jpn_row = QHBoxLayout()
-        jpn_label = QLabel(_("batch_jpn_field_label") if _("batch_jpn_field_label") != "batch_jpn_field_label" else "Japanese example field:")
-        self.jpn_field_combo = QComboBox()
-        jpn_row.addWidget(jpn_label)
-        jpn_row.addWidget(self.jpn_field_combo)
-        layout.addLayout(jpn_row)
+        self.jpn_field_combos = []
+        self.trans_field_combos = []
+        self.field_pair_widgets = []
 
-        # Translation destination field
-        trans_row = QHBoxLayout()
-        trans_label = QLabel(_("batch_trans_field_label") if _("batch_trans_field_label") != "batch_trans_field_label" else "Translated example field:")
-        self.trans_field_combo = QComboBox()
-        trans_row.addWidget(trans_label)
-        trans_row.addWidget(self.trans_field_combo)
-        layout.addLayout(trans_row)
+        # Wrap everything in an HBox
+        mapping_layout = QHBoxLayout()
+        layout.addLayout(mapping_layout)
+
+        # Left side: +/- buttons
+        btn_layout = QVBoxLayout()
+        
+        self.plus_btn = QPushButton("+")
+        self.plus_btn.setFixedWidth(30)
+        self.plus_btn.setStyleSheet("color: #1a7f37; font-weight: bold; font-size: 16px;")
+        self.plus_btn.clicked.connect(self._add_field_pair)
+        btn_layout.addWidget(self.plus_btn)
+        
+        self.minus_btn = QPushButton("-")
+        self.minus_btn.setFixedWidth(30)
+        self.minus_btn.setStyleSheet("color: #d1242f; font-weight: bold; font-size: 16px;")
+        self.minus_btn.clicked.connect(self._remove_last_field_pair)
+        btn_layout.addWidget(self.minus_btn)
+        
+        btn_layout.addStretch()
+        mapping_layout.addLayout(btn_layout)
+
+        # Right side: container for fields
+        self.fields_container = QVBoxLayout()
+        mapping_layout.addLayout(self.fields_container)
+
+        # Added dynamic row logic
+        self._add_field_pair()
 
         # Skip checkbox
         self.skip_checkbox = QCheckBox(_("batch_skip_existing"))
@@ -193,6 +211,81 @@ class BatchDialog(QDialog):
         # Set initial file status and populate fields
         self._update_file_status()
         self._populate_fields()
+
+    def _add_field_pair(self):
+        if hasattr(self, 'field_pair_widgets') and len(self.field_pair_widgets) >= 3:
+            return
+            
+        from aqt.qt import QWidget, QFrame
+        row_widget = QWidget()
+        row_layout = QVBoxLayout()
+        row_layout.setContentsMargins(0, 0, 0, 10)
+        row_widget.setLayout(row_layout)
+        
+        idx = len(self.field_pair_widgets) + 1
+        
+        # Japanese row
+        jpn_layout = QHBoxLayout()
+        jpn_label = QLabel(_(f"batch_jpn_field_label_{idx}"))
+        jpn_combo = QComboBox()
+        jpn_combo.currentIndexChanged.connect(self._validate_run_button)
+        jpn_layout.addWidget(jpn_label)
+        jpn_layout.addWidget(jpn_combo)
+        row_layout.addLayout(jpn_layout)
+        
+        # Translation row
+        trans_layout = QHBoxLayout()
+        trans_label = QLabel(_(f"batch_trans_field_label_{idx}"))
+        trans_combo = QComboBox()
+        trans_combo.currentIndexChanged.connect(self._validate_run_button)
+        trans_layout.addWidget(trans_label)
+        trans_layout.addWidget(trans_combo)
+        row_layout.addLayout(trans_layout)
+        
+        # Separator line if not the first
+        if idx > 1:
+            line = QFrame()
+            line.setFrameShape(QFrame.Shape.HLine)
+            line.setFrameShadow(QFrame.Shadow.Sunken)
+            # Insert at the top of this row widget to separate from previous
+            row_layout.insertWidget(0, line)
+            
+        self.fields_container.addWidget(row_widget)
+        
+        self.field_pair_widgets.append(row_widget)
+        self.jpn_field_combos.append(jpn_combo)
+        self.trans_field_combos.append(trans_combo)
+        
+        # Populate combinations if we already have field names
+        jpn_combo.addItem(_("batch_field_none"))
+        trans_combo.addItem(_("batch_field_none"))
+        if hasattr(self, 'current_field_names') and self.current_field_names:
+            jpn_combo.addItems(self.current_field_names)
+            trans_combo.addItems(self.current_field_names)
+            
+        self._update_buttons()
+
+    def _remove_last_field_pair(self):
+        if len(self.field_pair_widgets) <= 1:
+            return
+            
+        row_widget = self.field_pair_widgets.pop()
+        self.fields_container.removeWidget(row_widget)
+        row_widget.deleteLater()
+        
+        self.jpn_field_combos.pop()
+        self.trans_field_combos.pop()
+        
+        self._update_buttons()
+        
+        # Ask the layout to reconsider its size, then shrink window
+        self.layout().activate()
+        self.adjustSize()
+
+    def _update_buttons(self):
+        self.minus_btn.setEnabled(len(self.field_pair_widgets) > 1)
+        self.plus_btn.setEnabled(len(self.field_pair_widgets) < 3)
+        self._validate_run_button()
 
     # ── Deck population ─────────────────────────────────────────────
 
@@ -232,8 +325,10 @@ class BatchDialog(QDialog):
         - None
         """
         self.source_field_combo.clear()
-        self.jpn_field_combo.clear()
-        self.trans_field_combo.clear()
+        for jpn_combo in getattr(self, "jpn_field_combos", []):
+            jpn_combo.clear()
+        for trans_combo in getattr(self, "trans_field_combos", []):
+            trans_combo.clear()
         self.deck_status_label.hide()
 
         deck_id = self.deck_combo.currentData()
@@ -243,19 +338,22 @@ class BatchDialog(QDialog):
         try:
             note_ids = mw.col.find_notes(f"did:{deck_id}")
             if not note_ids:
-                translated = _("batch_no_fields")
-                if translated == "batch_no_fields":
-                    translated = "No fields available. Please select a deck with notes."
-                self.deck_status_label.setText(translated)
+                self.deck_status_label.setText(_("batch_no_fields"))
                 self.deck_status_label.show()
                 return
 
             note = mw.col.get_note(note_ids[0])
-            field_names = [fld["name"] for fld in note.note_type()["flds"]]
+            self.current_field_names = [fld["name"] for fld in note.note_type()["flds"]]
 
-            self.source_field_combo.addItems(field_names)
-            self.jpn_field_combo.addItems(field_names)
-            self.trans_field_combo.addItems(field_names)
+            self.source_field_combo.addItems(self.current_field_names)
+            
+            for jpn_combo in self.jpn_field_combos:
+                jpn_combo.addItem(_("batch_field_none"))
+                jpn_combo.addItems(self.current_field_names)
+                
+            for trans_combo in self.trans_field_combos:
+                trans_combo.addItem(_("batch_field_none"))
+                trans_combo.addItems(self.current_field_names)
         except Exception:
             pass
 
@@ -295,10 +393,38 @@ class BatchDialog(QDialog):
                 msg = f"Status: Downloaded on {date_str} ({count} pairs)"
 
             self.file_status_label.setText(msg)
-            self.run_button.setEnabled(True)
+            self._validate_run_button()
         else:
             self.file_status_label.setText(_("batch_file_not_downloaded"))
             self.run_button.setEnabled(False)
+
+    def _validate_run_button(self):
+        """Enable run button only if valid pairs are selected and file exists."""
+        if not hasattr(self, 'run_button'):
+            return
+
+        lang = self.language_combo.currentText()
+        if not tatoeba_data.is_data_available(lang):
+            self.run_button.setEnabled(False)
+            return
+
+        # Check if all pairs have exactly "none" in both, or something valid in both
+        has_at_least_one_valid_pair = False
+        
+        for jpn_combo, trans_combo in zip(self.jpn_field_combos, self.trans_field_combos):
+            jpn_dest = jpn_combo.currentText()
+            trans_dest = trans_combo.currentText()
+            
+            jpn_set = jpn_dest and jpn_dest != _("batch_field_none")
+            trans_set = trans_dest and trans_dest != _("batch_field_none")
+            
+            if jpn_set and trans_set:
+                has_at_least_one_valid_pair = True
+            elif (jpn_set and not trans_set) or (not jpn_set and trans_set):
+                self.run_button.setEnabled(False)
+                return
+                
+        self.run_button.setEnabled(has_at_least_one_valid_pair)
 
     def _on_download(self):
         """
@@ -384,16 +510,25 @@ class BatchDialog(QDialog):
 
         deck_id = self.deck_combo.currentData()
         source_field = self.source_field_combo.currentText()
-        jpn_dest_field = self.jpn_field_combo.currentText()
-        trans_dest_field = self.trans_field_combo.currentText()
         skip_existing = self.skip_checkbox.isChecked()
 
-        if not source_field or not jpn_dest_field or not trans_dest_field:
+        dest_field_pairs = []
+        for jpn_combo, trans_combo in zip(self.jpn_field_combos, self.trans_field_combos):
+            jpn_dest = jpn_combo.currentText()
+            trans_dest = trans_combo.currentText()
+            
+            jpn_set = jpn_dest and jpn_dest != _("batch_field_none")
+            trans_set = trans_dest and trans_dest != _("batch_field_none")
+            
+            if jpn_set and trans_set:
+                dest_field_pairs.append((jpn_dest, trans_dest))
+
+        if not source_field or not dest_field_pairs:
             translated = _("batch_no_fields")
             if translated != "batch_no_fields":
                 showInfo(translated)
             else:
-                showInfo("No fields available. Please select a deck with notes.")
+                showInfo("No fields available or no valid destination pairs selected.")
             return
 
         self.run_button.setEnabled(False)
@@ -404,8 +539,7 @@ class BatchDialog(QDialog):
                 deck_id=deck_id,
                 lang_label=lang,
                 source_field=source_field,
-                jpn_dest_field=jpn_dest_field,
-                trans_dest_field=trans_dest_field,
+                dest_field_pairs=dest_field_pairs,
                 skip_existing=skip_existing,
             )
 

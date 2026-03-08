@@ -41,15 +41,15 @@ class TestJapaneseExamples(unittest.TestCase):
         }
 
         # Import the module under test
-        if 'japanese_examples' in sys.modules:
-            del sys.modules['japanese_examples']
-        import japanese_examples
+        if 'src.core.japanese_examples' in sys.modules:
+            del sys.modules['src.core.japanese_examples']
+        import src.core.japanese_examples as japanese_examples
         self.japanese_examples = japanese_examples
 
     def tearDown(self):
         self.modules_patcher.stop()
-        if 'japanese_examples' in sys.modules:
-            del sys.modules['japanese_examples']
+        if 'src.core.japanese_examples' in sys.modules:
+            del sys.modules['src.core.japanese_examples']
 
     # ── URL & params encoding ───────────────────────────────────────
 

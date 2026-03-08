@@ -14,11 +14,8 @@ sys.modules['aqt.utils'] = MagicMock()
 sys.modules['aqt.qt'] = MagicMock()
 
 # Import freshly
-for mod in ['batch_engine', 'tatoeba_data']:
-    if mod in sys.modules:
-        del sys.modules[mod]
-import batch_engine
-from batch_engine import BatchResult
+import src.core.batch_engine as batch_engine
+from src.core.batch_engine import BatchResult
 
 
 class TestBatchResult(unittest.TestCase):
@@ -96,7 +93,7 @@ class TestRunBatch(unittest.TestCase):
         col.get_note.side_effect = lambda nid: notes_dict[nid]
         return col
 
-    @patch('batch_engine.tatoeba_data')
+    @patch('src.core.batch_engine.tatoeba_data')
     def test_run_batch_updates_notes(self, mock_td):
         """run_batch should update notes when matches are found."""
         mock_td.LANG_MAP = {"English": "eng"}
@@ -112,8 +109,8 @@ class TestRunBatch(unittest.TestCase):
 
         result = batch_engine.run_batch(
             col=col, deck_id=1, lang_label="English",
-            source_field="Word", jpn_dest_field="ExampleJapanese",
-            trans_dest_field="ExampleTranslated", skip_existing=True
+            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated")],
+            skip_existing=True
         )
 
         self.assertEqual(result.updated, 1)
@@ -123,7 +120,7 @@ class TestRunBatch(unittest.TestCase):
         self.assertEqual(note.fields[1], "猫が好きです。")
         self.assertEqual(note.fields[2], "I like cats.")
 
-    @patch('batch_engine.tatoeba_data')
+    @patch('src.core.batch_engine.tatoeba_data')
     def test_run_batch_skips_existing(self, mock_td):
         """run_batch should skip notes that already have examples when skip_existing=True."""
         mock_td.LANG_MAP = {"English": "eng"}
@@ -138,15 +135,15 @@ class TestRunBatch(unittest.TestCase):
 
         result = batch_engine.run_batch(
             col=col, deck_id=1, lang_label="English",
-            source_field="Word", jpn_dest_field="ExampleJapanese",
-            trans_dest_field="ExampleTranslated", skip_existing=True
+            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated")],
+            skip_existing=True
         )
 
         self.assertEqual(result.skipped_existing, 1)
         self.assertEqual(result.updated, 0)
         col.update_note.assert_not_called()
 
-    @patch('batch_engine.tatoeba_data')
+    @patch('src.core.batch_engine.tatoeba_data')
     def test_run_batch_no_skip_when_disabled(self, mock_td):
         """run_batch should overwrite existing examples when skip_existing=False."""
         mock_td.LANG_MAP = {"English": "eng"}
@@ -162,14 +159,14 @@ class TestRunBatch(unittest.TestCase):
 
         result = batch_engine.run_batch(
             col=col, deck_id=1, lang_label="English",
-            source_field="Word", jpn_dest_field="ExampleJapanese",
-            trans_dest_field="ExampleTranslated", skip_existing=False
+            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated")],
+            skip_existing=False
         )
 
         self.assertEqual(result.updated, 1)
         self.assertEqual(result.skipped_existing, 0)
 
-    @patch('batch_engine.tatoeba_data')
+    @patch('src.core.batch_engine.tatoeba_data')
     def test_run_batch_no_match(self, mock_td):
         """run_batch should count notes with no match as skipped_no_match."""
         mock_td.LANG_MAP = {"English": "eng"}
@@ -185,14 +182,13 @@ class TestRunBatch(unittest.TestCase):
 
         result = batch_engine.run_batch(
             col=col, deck_id=1, lang_label="English",
-            source_field="Word", jpn_dest_field="ExampleJapanese",
-            trans_dest_field="ExampleTranslated"
+            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated")]
         )
 
         self.assertEqual(result.skipped_no_match, 1)
         self.assertEqual(result.updated, 0)
 
-    @patch('batch_engine.tatoeba_data')
+    @patch('src.core.batch_engine.tatoeba_data')
     def test_run_batch_missing_source_field(self, mock_td):
         """run_batch should skip notes missing the source field."""
         mock_td.LANG_MAP = {"English": "eng"}
@@ -207,13 +203,12 @@ class TestRunBatch(unittest.TestCase):
 
         result = batch_engine.run_batch(
             col=col, deck_id=1, lang_label="English",
-            source_field="Word", jpn_dest_field="ExampleJapanese",
-            trans_dest_field="ExampleTranslated"
+            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated")]
         )
 
         self.assertEqual(result.skipped_missing_fields, 1)
 
-    @patch('batch_engine.tatoeba_data')
+    @patch('src.core.batch_engine.tatoeba_data')
     def test_run_batch_unknown_language(self, mock_td):
         """run_batch should return empty result for unknown language."""
         mock_td.LANG_MAP = {"English": "eng"}
@@ -221,22 +216,21 @@ class TestRunBatch(unittest.TestCase):
         col = MagicMock()
         result = batch_engine.run_batch(
             col=col, deck_id=1, lang_label="Klingon",
-            source_field="Word", jpn_dest_field="ExampleJapanese",
-            trans_dest_field="ExampleTranslated"
+            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated")]
         )
 
         self.assertEqual(result.total_processed, 0)
         col.find_notes.assert_not_called()
 
-    @patch('batch_engine.tatoeba_data')
-    @patch('batch_engine.random.choice')
-    def test_run_batch_selects_random_match(self, mock_choice, mock_td):
-        """run_batch should use random.choice when multiple matches exist."""
+    @patch('src.core.batch_engine.tatoeba_data')
+    @patch('src.core.batch_engine.random.sample')
+    def test_run_batch_selects_random_sample(self, mock_sample, mock_td):
+        """run_batch should use random.sample when multiple matches exist."""
         mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         matches = [("例文A。", "Example A."), ("例文B。", "Example B.")]
         mock_td.search_word.return_value = matches
-        mock_choice.return_value = ("例文B。", "Example B.")
+        mock_sample.return_value = [("例文B。", "Example B.")]
 
         field_order = ["Word", "ExampleJapanese", "ExampleTranslated"]
         note = self._make_mock_note(
@@ -247,14 +241,59 @@ class TestRunBatch(unittest.TestCase):
 
         result = batch_engine.run_batch(
             col=col, deck_id=1, lang_label="English",
-            source_field="Word", jpn_dest_field="ExampleJapanese",
-            trans_dest_field="ExampleTranslated"
+            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated")]
         )
 
-        mock_choice.assert_called_once_with(matches)
+        mock_sample.assert_called_once_with(matches, 1)
         self.assertEqual(result.updated, 1)
         self.assertEqual(note.fields[1], "例文B。")
 
+
+    @patch('src.core.batch_engine.tatoeba_data')
+    def test_run_batch_multiple_pairs(self, mock_td):
+        """run_batch should populate multiple fields when dest_field_pairs > 1."""
+        mock_td.LANG_MAP = {"English": "eng"}
+        mock_td.get_db_path.return_value = self.temp_db_path
+        
+        matches = [
+            ("例文1。", "Example 1."),
+            ("例文2。", "Example 2."),
+            ("例文3。", "Example 3.")
+        ]
+        mock_td.search_word.return_value = matches
+
+        field_order = [
+            "Word",
+            "Jpn1", "Trans1",
+            "Jpn2", "Trans2"
+        ]
+        
+        note = self._make_mock_note(
+            {"Word": "例文", "Jpn1": "", "Trans1": "", "Jpn2": "", "Trans2": ""},
+            field_order
+        )
+        col = self._make_mock_col([1], {1: note})
+
+        result = batch_engine.run_batch(
+            col=col, deck_id=1, lang_label="English",
+            source_field="Word",
+            dest_field_pairs=[
+                ("Jpn1", "Trans1"),
+                ("Jpn2", "Trans2")
+            ]
+        )
+
+        self.assertEqual(result.updated, 1)
+        col.update_note.assert_called_once_with(note)
+        
+        # We expect 2 matches to be chosen
+        self.assertNotEqual(note.fields[1], "")
+        self.assertNotEqual(note.fields[2], "")
+        self.assertNotEqual(note.fields[3], "")
+        self.assertNotEqual(note.fields[4], "")
+        
+        # Make sure they are distinct
+        self.assertNotEqual(note.fields[1], note.fields[3])
 
 if __name__ == '__main__':
     unittest.main()

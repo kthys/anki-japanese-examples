@@ -14,16 +14,16 @@ except ImportError:
     mw = None  # for testing outside Anki
 
 try:
-    from .i18n import _
+    from ..utils.i18n import _
 except ImportError:
     try:
-        from i18n import _
+        from src.utils.i18n import _
     except Exception:
         _ = lambda x: x
 
 TATOEBA_BASE_URL = "https://downloads.tatoeba.org/exports/per_language"
 LANG_MAP = {"English": "eng", "French": "fra"}
-USER_FILES_DIR = os.path.join(os.path.dirname(__file__), "user_files")
+USER_FILES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "user_files")
 METADATA_FILE = os.path.join(USER_FILES_DIR, "metadata.json")
 
 # Regex pattern for tokenizing Japanese text: matches runs of kanji, katakana, or hiragana

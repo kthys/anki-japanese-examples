@@ -44,5 +44,16 @@
     "batch_step_fetch_target": "Récupération des phrases {lang}…",
     "batch_step_fetch_links": "Récupération des liens…",
     "batch_step_build_tsv": "Construction des paires de phrases…",
-    "batch_step_build_index": "Construction de l'index de recherche…"
+    "batch_step_build_index": "Construction de l'index de recherche…",
+    "batch_jpn_field_label_1": "Champ exemple japonais 1 :",
+    "batch_jpn_field_label_2": "Champ exemple japonais 2 :",
+    "batch_jpn_field_label_3": "Champ exemple japonais 3 :",
+    "batch_trans_field_label_1": "Champ exemple traduit 1 :",
+    "batch_trans_field_label_2": "Champ exemple traduit 2 :",
+    "batch_trans_field_label_3": "Champ exemple traduit 3 :",
+    "batch_running": "Exécution du traitement en lot...",
+    "batch_language_english": "Anglais",
+    "batch_language_french": "Français",
+    "batch_field_none": "-- Aucun --",
+    "batch_error_incomplete_pair": "Veuillez sélectionner un champ Japonais et un champ Traduit pour chaque paire, ou définir les deux sur '-- Aucun --'."
 }

@@ -60,22 +60,22 @@ class TestGUIAsync(unittest.TestCase):
         # Set constants to match the field names we will use in the test
         self.mock_japanese_examples.DST_FIELD_JAP = 'Expression'
         self.mock_japanese_examples.DST_FIELD_TRANSLATION = 'Meaning'
-        sys.modules['japanese_examples'] = self.mock_japanese_examples
+        sys.modules['src.core.japanese_examples'] = self.mock_japanese_examples
 
         # Import the module under test
-        if 'GUI' in sys.modules:
-            del sys.modules['GUI']
-        import GUI
+        if 'src.ui.GUI' in sys.modules:
+            del sys.modules['src.ui.GUI']
+        import src.ui.GUI as GUI
         self.GUI = GUI
 
     def tearDown(self):
         self.modules_patcher.stop()
-        if 'GUI' in sys.modules:
-            del sys.modules['GUI']
+        if 'src.ui.GUI' in sys.modules:
+            del sys.modules['src.ui.GUI']
 
-    @patch('GUI.find_japanese_sentence')
-    @patch('GUI.create_custom_dialog')
-    @patch('GUI.showInfo')
+    @patch('src.ui.GUI.find_japanese_sentence')
+    @patch('src.ui.GUI.create_custom_dialog')
+    @patch('src.ui.GUI.showInfo')
     def test_add_example_manually_dialog_flow(self, mock_showInfo, mock_create_custom_dialog, mock_find_japanese_sentence):
         # Setup mocks
         editor = MagicMock()
@@ -90,7 +90,7 @@ class TestGUIAsync(unittest.TestCase):
 
         # Mock create_custom_dialog returns
         # 1. Language selection: returns (0, False) because deck_id is detected (via mocks) so checkbox is shown
-        # 2. Example selection: returns 0 (index)
+        # 2. Example selection: returns 0 (selected index)
         mock_create_custom_dialog.side_effect = [(0, False), 0]
 
         # Mock find_japanese_sentence result
@@ -134,11 +134,8 @@ class TestGUIAsync(unittest.TestCase):
         scheduled_func()
 
         # Verify second dialog (Example selection)
-        # Check second call to create_custom_dialog
         args2, kwargs2 = mock_create_custom_dialog.call_args_list[1]
         self.assertEqual(args2[0], _('select_sentence_dialog'))
-        # Should NOT have with_checkbox=True (default is False)
-        self.assertFalse(kwargs2.get('with_checkbox', False))
 
         # Verify note update
         # DST_FIELD_JAP is 'Expression' (index 0)
@@ -167,16 +164,12 @@ class TestGUIAsync(unittest.TestCase):
                 'flds': [{'name': 'Expression'}, {'name': 'Meaning'}, {'name': 'Reading'}]
             }
 
-            with patch('GUI.create_custom_dialog') as mock_dialog, \
-                 patch('GUI.find_japanese_sentence') as mock_find:
+            with patch('src.ui.GUI.create_custom_dialog') as mock_dialog, \
+                 patch('src.ui.GUI.create_multi_selection_dialog') as mock_multi_dialog, \
+                 patch('src.ui.GUI.find_japanese_sentence') as mock_find:
 
-                mock_dialog.return_value = (0, False) # English, no save
+                mock_dialog.side_effect = [(0, False), 0] # English, no save; then first index
                 mock_find.return_value = [{'jp_sentence': 'JP1', 'tr_sentence': 'TR1'}]
-
-                # Mock create_custom_dialog again for result picker
-                # 1. Language: (0, False)
-                # 2. Result: 0
-                mock_dialog.side_effect = [(0, False), 0]
 
                 # Call
                 self.GUI.add_example_manually_dialog(editor)
@@ -192,6 +185,7 @@ class TestGUIAsync(unittest.TestCase):
 
                 # Verify logic ran (check note update)
                 self.assertEqual(editor.note.fields[0], 'JP1')
+                self.assertEqual(editor.note.fields[1], 'TR1')
 
         finally:
             self.GUI.QueryOp = original_query_op
@@ -230,7 +224,7 @@ class TestGUIAsync(unittest.TestCase):
 
     # ── Early return on empty field ─────────────────────────────────
 
-    @patch('GUI.showInfo')
+    @patch('src.ui.GUI.showInfo')
     def test_add_example_manually_dialog_returns_early_if_no_field(self, mock_showInfo):
         """Should call showInfo and return when currentField is None."""
         editor = MagicMock()

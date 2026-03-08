@@ -14,9 +14,9 @@ sys.modules['aqt.utils'] = MagicMock()
 sys.modules['aqt.qt'] = MagicMock()
 
 # Import freshly
-if "tatoeba_data" in sys.modules:
-    del sys.modules["tatoeba_data"]
-import tatoeba_data
+if "src.core.tatoeba_data" in sys.modules:
+    del sys.modules["src.core.tatoeba_data"]
+import src.core.tatoeba_data as tatoeba_data
 
 class TestTatoebaData(unittest.TestCase):
     def setUp(self):
@@ -78,14 +78,14 @@ class TestTatoebaData(unittest.TestCase):
     def test_build_pairs_tsv_empty_input(self):
         self.assertEqual(tatoeba_data.build_pairs_tsv("", "", ""), "")
 
-    @patch('tatoeba_data.requests.get')
+    @patch('src.core.tatoeba_data.requests.get')
     def test_download_tatoeba_data_success(self, mock_get):
         mock_response = MagicMock()
         mock_response.content = bz2.compress(b"mock tsv content")
         mock_response.raise_for_status.return_value = None
         mock_get.return_value = mock_response
 
-        with patch('tatoeba_data.build_pairs_tsv', return_value="1\t猫\t100\tcat\n"):
+        with patch('src.core.tatoeba_data.build_pairs_tsv', return_value="1\t猫\t100\tcat\n"):
             success, msg = tatoeba_data.download_tatoeba_data("English")
             self.assertTrue(success)
             self.assertIn("1", msg) # The count should be 1
@@ -103,7 +103,7 @@ class TestTatoebaData(unittest.TestCase):
                 self.assertIn("eng", md)
                 self.assertEqual(md["eng"]["count"], 1)
 
-    @patch('tatoeba_data.requests.get')
+    @patch('src.core.tatoeba_data.requests.get')
     def test_download_tatoeba_data_network_error(self, mock_get):
         mock_get.side_effect = tatoeba_data.requests.exceptions.RequestException("Connection refused")
         
@@ -268,8 +268,8 @@ class TestTatoebaData(unittest.TestCase):
 
         callback = MagicMock()
 
-        with patch('tatoeba_data.requests.get', return_value=mock_response):
-            with patch('tatoeba_data.build_pairs_tsv', return_value="1\t猫\t100\tcat\n"):
+        with patch('src.core.tatoeba_data.requests.get', return_value=mock_response):
+            with patch('src.core.tatoeba_data.build_pairs_tsv', return_value="1\t猫\t100\tcat\n"):
                 tatoeba_data.download_tatoeba_data("English", progress_callback=callback)
 
         self.assertGreaterEqual(callback.call_count, 5)

@@ -44,5 +44,16 @@
     "batch_step_fetch_target": "Fetching {lang} sentences…",
     "batch_step_fetch_links": "Fetching sentence links…",
     "batch_step_build_tsv": "Building sentence pairs…",
-    "batch_step_build_index": "Building search index…"
+    "batch_step_build_index": "Building search index…",
+    "batch_jpn_field_label_1": "Japanese example field 1:",
+    "batch_jpn_field_label_2": "Japanese example field 2:",
+    "batch_jpn_field_label_3": "Japanese example field 3:",
+    "batch_trans_field_label_1": "Translated example field 1:",
+    "batch_trans_field_label_2": "Translated example field 2:",
+    "batch_trans_field_label_3": "Translated example field 3:",
+    "batch_running": "Running batch process...",
+    "batch_language_english": "English",
+    "batch_language_french": "French",
+    "batch_field_none": "-- None --",
+    "batch_error_incomplete_pair": "Please select both a Japanese and Translation field for each pair, or set both to '-- None --'."
 }
