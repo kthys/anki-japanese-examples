@@ -51,25 +51,26 @@ class TestGUIUtilities(unittest.TestCase):
         self.mock_japanese_examples = MagicMock()
         self.mock_japanese_examples.DST_FIELD_JAP = 'Expression'
         self.mock_japanese_examples.DST_FIELD_TRANSLATION = 'Meaning'
-        sys.modules['japanese_examples'] = self.mock_japanese_examples
+        sys.modules['src.core.japanese_examples'] = self.mock_japanese_examples
 
         # Import the module under test
-        if 'GUI' in sys.modules:
-            del sys.modules['GUI']
-        import GUI
+        if 'src.ui.GUI' in sys.modules:
+            del sys.modules['src.ui.GUI']
+        import src.ui.GUI as GUI
         self.GUI = GUI
 
     def tearDown(self):
         self.modules_patcher.stop()
-        if 'GUI' in sys.modules:
-            del sys.modules['GUI']
-        if 'japanese_examples' in sys.modules:
-            del sys.modules['japanese_examples']
+        if 'src.ui.GUI' in sys.modules:
+            del sys.modules['src.ui.GUI']
+        if 'src.core.japanese_examples' in sys.modules:
+            del sys.modules['src.core.japanese_examples']
 
 
     def test_get_plugin_dir_path(self):
         """Test get_plugin_dir_path returns correct path based on __file__."""
-        expected_path = os.path.dirname(os.path.abspath(self.GUI.__file__))
+        # GUI.__file__ is src/ui/GUI.py, so we need to go up two directories to get to the root
+        expected_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(self.GUI.__file__))))
         result = self.GUI.get_plugin_dir_path()
         self.assertEqual(result, expected_path)
 

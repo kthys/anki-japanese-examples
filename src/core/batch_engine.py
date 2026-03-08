@@ -60,32 +60,34 @@ def run_batch(
     deck_id: int,
     lang_label: str,
     source_field: str,
-    jpn_dest_field: str,
-    trans_dest_field: str,
+    dest_field_pairs: list[tuple[str, str]],
     skip_existing: bool = True,
 ) -> BatchResult:
     """
     Run batch processing on all notes of a selected deck.
 
     Iterates over every note in the given deck, reads a Japanese word from the
-    source field, looks it up in the local SQLite index, and writes a randomly
-    selected matching sentence + translation (HTML-escaped) into the destination
-    fields.
+    source field, looks it up in the local SQLite index, and writes randomly
+    selected unique matching sentences + translations (HTML-escaped) into the 
+    destination field pairs.
 
     Args:
     - col: The Anki collection object (``mw.col``).
     - deck_id (int): The ID of the deck to process.
     - lang_label (str): Language label for Tatoeba data (e.g. 'English', 'French').
     - source_field (str): Name of the note field containing the word to search.
-    - jpn_dest_field (str): Name of the note field to write the Japanese example sentence.
-    - trans_dest_field (str): Name of the note field to write the translated sentence.
+    - dest_field_pairs (list[tuple[str, str]]): List of tuples containing the (Japanese, Translation)
+      destination field names.
     - skip_existing (bool): If True, skip notes that already have content in the
-      destination fields. Default is True.
+      FIRST destination field pair. Default is True.
 
     Returns:
     - A BatchResult dataclass with counters for updated, skipped, and errored notes.
     """
     result = BatchResult()
+
+    if not dest_field_pairs:
+        return result
 
     # Resolve language code and database path
     lang_code = tatoeba_data.LANG_MAP.get(lang_label)
@@ -114,7 +116,15 @@ def run_batch(
                 if source_field not in field_names:
                     result.skipped_missing_fields += 1
                     continue
-                if jpn_dest_field not in field_names or trans_dest_field not in field_names:
+                
+                # Verify all destination fields exist
+                fields_missing = False
+                for jpn_dest, trans_dest in dest_field_pairs:
+                    if jpn_dest not in field_names or trans_dest not in field_names:
+                        fields_missing = True
+                        break
+                
+                if fields_missing:
                     result.skipped_missing_fields += 1
                     continue
 
@@ -126,12 +136,13 @@ def run_batch(
                     result.skipped_missing_fields += 1
                     continue
 
-                # Check skip_existing
-                jpn_idx = field_names.index(jpn_dest_field)
-                trans_idx = field_names.index(trans_dest_field)
+                # Check skip_existing based on the FIRST field pair
+                first_jpn_dest, first_trans_dest = dest_field_pairs[0]
+                first_jpn_idx = field_names.index(first_jpn_dest)
+                first_trans_idx = field_names.index(first_trans_dest)
 
                 if skip_existing:
-                    if note.fields[jpn_idx].strip() and note.fields[trans_idx].strip():
+                    if note.fields[first_jpn_idx].strip() and note.fields[first_trans_idx].strip():
                         result.skipped_existing += 1
                         continue
 
@@ -141,12 +152,18 @@ def run_batch(
                     result.skipped_no_match += 1
                     continue
 
-                # Select a random match
-                jpn_text, trans_text = random.choice(matches)
+                # Select unique random matches up to the number of pairs requested or available
+                num_to_select = min(len(dest_field_pairs), len(matches))
+                selected_matches = random.sample(matches, num_to_select)
 
                 # Write HTML-escaped results
-                note.fields[jpn_idx] = html.escape(jpn_text)
-                note.fields[trans_idx] = html.escape(trans_text)
+                for i, (jpn_text, trans_text) in enumerate(selected_matches):
+                    jpn_idx = field_names.index(dest_field_pairs[i][0])
+                    trans_idx = field_names.index(dest_field_pairs[i][1])
+                    
+                    note.fields[jpn_idx] = html.escape(jpn_text)
+                    note.fields[trans_idx] = html.escape(trans_text)
+                    
                 col.update_note(note)
                 result.updated += 1
 

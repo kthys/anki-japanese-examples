@@ -3,9 +3,9 @@ from aqt.utils import QDialog, QVBoxLayout, QPushButton, QFormLayout, QDialogBut
 from aqt.qt import QLineEdit
 
 try:
-    from .i18n import _
+    from ..utils.i18n import _
 except ImportError:
-    from i18n import _
+    from src.utils.i18n import _
 
 class ConfigDialog(QDialog):
     def __init__(self, parent=None):
@@ -60,6 +60,12 @@ class ConfigDialog(QDialog):
             self.config = {}
         self.config["japaneseDstField"] = self.jp_field.text()
         self.config["translationDstField"] = self.tr_field.text()
+        
+        # Clean up legacy multi-fields if present
+        for key in ["japaneseDstField2", "japaneseDstField3", "translationDstField2", "translationDstField3"]:
+            if key in self.config:
+                del self.config[key]
+        
         mw.addonManager.writeConfig(self.addon_name, self.config)
         self.accept()
 

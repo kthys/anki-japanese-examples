@@ -10,7 +10,7 @@ def get_plugin_version():
     Returns:
     - A string containing the plugin version. Default is '1.1.0'.
     """
-    addon_dir = os.path.dirname(__file__)
+    addon_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     manifest_path = os.path.join(addon_dir, "manifest.json")
     try:
         with open(manifest_path, "r", encoding="utf-8") as f:
@@ -26,7 +26,7 @@ def get_changelog_text():
     Returns:
     - A string containing the changelog text. Returns an empty string if an error occurs.
     """
-    addon_dir = os.path.dirname(__file__)
+    addon_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     changelog_path = os.path.join(addon_dir, "changelog.md")
     try:
         with open(changelog_path, "r", encoding="utf-8") as f:

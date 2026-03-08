@@ -7,14 +7,15 @@
     "minAnkiVersion": "2.1.0",
     "files": [
         "__init__.py",
-        "japanese_examples.py",
-        "GUI.py",
+        "src/core/japanese_examples.py",
+        "src/ui/GUI.py",
         "config.json",
         "config.md",
-        "config_ui.py",
-        "i18n.py",
+        "src/ui/config_ui.py",
+        "src/ui/batch_ui.py",
+        "src/utils/i18n.py",
         "editor_icon_manual.png",
-        "changelog.py",
+        "src/utils/changelog.py",
         "changelog.md"
     ]
 }

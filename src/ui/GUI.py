@@ -9,9 +9,9 @@ except ImportError:
     from PyQt6.QtCore import QTimer
 
 try:
-    from .japanese_examples import find_japanese_sentence, DST_FIELD_TRANSLATION, DST_FIELD_JAP
+    from ..core.japanese_examples import find_japanese_sentence, DST_FIELD_TRANSLATION, DST_FIELD_JAP
 except ImportError:
-    from japanese_examples import find_japanese_sentence, DST_FIELD_TRANSLATION, DST_FIELD_JAP
+    from src.core.japanese_examples import find_japanese_sentence, DST_FIELD_TRANSLATION, DST_FIELD_JAP
 
 # Try to import QueryOp for background operations (Anki 2.1.50+)
 try:
@@ -30,12 +30,12 @@ def get_plugin_dir_path():
     Returns:
     - The absolute string path to the plugin directory.
     """
-    return os.path.dirname(os.path.abspath(__file__))
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
-    from .i18n import _
+    from ..utils.i18n import _
 except ImportError:
-    from i18n import _
+    from src.utils.i18n import _
 
 def create_custom_dialog(message, choices, start_row=0, parent=None, with_checkbox=False, checkbox_text=""):
     """
@@ -117,6 +117,72 @@ def create_custom_dialog(message, choices, start_row=0, parent=None, with_checkb
         return (selection_list.currentRow(), checkbox.isChecked())
     else:
         return selection_list.currentRow()
+
+
+def create_multi_selection_dialog(message, choices, parent=None, with_checkbox=False, checkbox_text="", max_selections=None):
+    """
+    Creates a custom dialog with a multi-selection list
+    and OK/Cancel buttons.
+
+    Returns:
+    - If with_checkbox is False: Returns a list of integer indices of the selected rows, or None if cancelled.
+    - If with_checkbox is True: Returns a tuple (list of indices, bool checkbox_checked), or None if cancelled.
+    """
+    if parent is None:
+        parent_window = mw.app.activeWindow()
+    else:
+        parent_window = parent
+
+    dialog = QDialog(parent_window)
+    dialog.setWindowModality(Qt.WindowModality.WindowModal)
+
+    layout = QVBoxLayout()
+    dialog.setLayout(layout)
+
+    text = QLabel(message)
+    layout.addWidget(text)
+
+    selection_list = QListWidget()
+    selection_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+    selection_list.addItems(choices)
+    layout.addWidget(selection_list)
+
+    checkbox = None
+    if with_checkbox:
+        h_layout = QHBoxLayout()
+        checkbox = QCheckBox(checkbox_text)
+        h_layout.addWidget(checkbox)
+
+        info_label = QLabel("ⓘ")
+        info_label.setToolTip(_("deck_preference_info_tooltip"))
+        h_layout.addWidget(info_label)
+
+        h_layout.addStretch()
+        layout.addLayout(h_layout)
+
+    standard_buttons = QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+    button_box = QDialogButtonBox(standard_buttons)
+    button_box.accepted.connect(dialog.accept)
+    button_box.rejected.connect(dialog.reject)
+    layout.addWidget(button_box)
+
+    while True:
+        result = dialog.exec()
+        if result == 0:
+            return None
+        
+        selected_indices = [item.row() for item in selection_list.selectedIndexes()]
+        if max_selections is not None and len(selected_indices) > max_selections:
+            # Let the user know they selected too many
+            showInfo(f"Please select up to {max_selections} sentences. Your note schema only supports inserting {max_selections} examples.")
+            continue
+        
+        break
+
+    if with_checkbox:
+        return (selected_indices, checkbox.isChecked())
+    else:
+        return selected_indices
 
 
 
@@ -246,61 +312,55 @@ def add_example_manually_dialog(editor):
                     return
 
                 def show_result_dialog():
+                    # Get the current note opened in the editor
+                    note = editor.note
+                    
+                    # Get the field names
+                    note_type = note.note_type()
+                    fields = note_type['flds']
+                    field_names = [field['name'] for field in fields]
+                    
+                    # Use dynamic config for field names
+                    current_config = mw.addonManager.getConfig(addon_name) or {}
+                    
+                    jp_f = current_config.get("japaneseDstField", "ExampleJapanese")
+                    tr_f = current_config.get("translationDstField", "ExampleTranslated")
+
+                    valid_field_pairs = []
+                    if jp_f in field_names and tr_f in field_names:
+                        valid_field_pairs.append((field_names.index(jp_f), field_names.index(tr_f)))
+                    
+                    if not valid_field_pairs:
+                        showInfo(_("No valid destination fields found in the current note schema. Please check your configuration."))
+                        return
+
                     # User chooses which example to add
-                    # We pass the parent window explicitly to avoid attaching to the progress dialog
-                    # Use editor.parentWindow (Browser/Add window) as parent.
-                    example_picker_index = create_custom_dialog(
-                    _('select_sentence_dialog'),
-                    examples,
-                    parent=editor.parentWindow
+                    selected_index = create_custom_dialog(
+                        _('select_sentence_dialog'),
+                        examples,
+                        parent=editor.parentWindow
                     )
 
-                    if example_picker_index is None:
+                    if selected_index is None:
                         showInfo(_('no_example_selected'))
                         return
 
-                    else:
-                        chosen_example = examples_sentences[example_picker_index]
-                        jp_sentence = chosen_example['jp_sentence']
-                        tr_sentence = chosen_example['tr_sentence']
+                    chosen_example = examples_sentences[selected_index]
+                    jp_sentence = chosen_example['jp_sentence']
+                    tr_sentence = chosen_example['tr_sentence']
 
-                        # Get the current note opened in the editor
-                        note = editor.note
+                    jp_field_index, en_field_index = valid_field_pairs[0]
 
-                        # Get the field names
-                        note_type = note.note_type()
-                        fields = note_type['flds']
-                        field_names = [field['name'] for field in fields]
+                    # Set the value of the field
+                    note.fields[jp_field_index] = html.escape(jp_sentence)
+                    note.fields[en_field_index] = html.escape(tr_sentence)
 
-                        # Use dynamic config for field names
-                        # Re-read config in case it changed (though usually cached by Anki)
-                        current_config = mw.addonManager.getConfig(addon_name) or {}
-                        dst_field_jap = current_config.get("japaneseDstField", "ExampleJapanese")
-                        dst_field_translation = current_config.get("translationDstField", "ExampleTranslated")
+                    # Save the changes to the note if the note already exists
+                    if note.id != 0:
+                        mw.col.update_note(note)
 
-                        # Find the index of the target fields, according to the ones defined in the config file
-                        try:
-                            jp_field_index = field_names.index(dst_field_jap)
-                        except ValueError:
-                            showInfo(_("{DST_FIELD_JAP}_field_not_found").format(DST_FIELD_JAP=dst_field_jap))
-                            return
-
-                        try:
-                            en_field_index = field_names.index(dst_field_translation)
-                        except ValueError:
-                            showInfo(_("{DST_FIELD_TRANSLATION}_field_not_found").format(DST_FIELD_TRANSLATION=dst_field_translation))
-                            return
-
-                        # Set the value of the field
-                        note.fields[jp_field_index] = html.escape(jp_sentence)
-                        note.fields[en_field_index]= html.escape(tr_sentence)
-
-                        # Save the changes to the note if the note already exists
-                        if note.id != 0 :
-                            mw.col.update_note(note)
-
-                        # Update the editor to show the changes
-                        editor.loadNote()
+                    # Update the editor to show the changes
+                    editor.loadNote()
 
                 show_result_dialog()
 

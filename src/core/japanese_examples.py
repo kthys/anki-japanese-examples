@@ -5,10 +5,10 @@ from aqt import mw
 # Use a global session for connection pooling to improve performance
 _session = requests.Session()
 try:
-    from .i18n import _
+    from ..utils.i18n import _
 except ImportError:
     try:
-        from i18n import _
+        from src.utils.i18n import _
     except ImportError:
         _ = lambda x: x
 

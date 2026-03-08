@@ -90,6 +90,9 @@ class TestBatchUI(unittest.TestCase):
             return inst
         mock_label_class.side_effect = make_label
 
+        mock_widget_class = MagicMock()
+        self.mock_qt.QWidget = mock_widget_class
+
         self.mock_qt.QComboBox = mock_combo_class
         self.mock_qt.QCheckBox = mock_checkbox_class
         self.mock_qt.QPushButton = mock_pushbutton_class
@@ -109,9 +112,9 @@ class TestBatchUI(unittest.TestCase):
         self.mock_mw.form.menuTools = MagicMock()
 
         # Import the module under test (fresh import)
-        if 'batch_ui' in sys.modules:
-            del sys.modules['batch_ui']
-        import batch_ui
+        if 'src.ui.batch_ui' in sys.modules:
+            del sys.modules['src.ui.batch_ui']
+        import src.ui.batch_ui as batch_ui
         self.batch_ui = batch_ui
 
     def tearDown(self):
@@ -125,7 +128,7 @@ class TestBatchUI(unittest.TestCase):
         """BatchDialog should have a language QComboBox."""
         dialog = self.batch_ui.BatchDialog()
         self.assertIsNotNone(dialog.language_combo)
-        dialog.language_combo.addItems.assert_called_once_with(["English", "French"])
+        self.assertEqual(dialog.language_combo.addItem.call_count, 2)
 
     def test_batch_dialog_creates_deck_combo(self):
         """BatchDialog should have a deck QComboBox populated from Anki."""

@@ -40,15 +40,15 @@ class TestJapaneseExamplesExceptions(unittest.TestCase):
 
         # Import the module under test
         # We need to ensure it's imported with our mocks
-        if 'japanese_examples' in sys.modules:
-            del sys.modules['japanese_examples']
-        import japanese_examples
+        if 'src.core.japanese_examples' in sys.modules:
+            del sys.modules['src.core.japanese_examples']
+        import src.core.japanese_examples as japanese_examples
         self.japanese_examples = japanese_examples
 
     def tearDown(self):
         self.modules_patcher.stop()
-        if 'japanese_examples' in sys.modules:
-            del sys.modules['japanese_examples']
+        if 'src.core.japanese_examples' in sys.modules:
+            del sys.modules['src.core.japanese_examples']
 
     def test_find_japanese_sentence_request_exception(self):
         # Configure the mock to raise a RequestException
