@@ -178,13 +178,14 @@ def search_word(db_path: str, word: str, conn: Optional[sqlite3.Connection] = No
     try:
         local_conn = conn if conn is not None else sqlite3.connect(db_path)
         cur = local_conn.cursor()
+        safe_word = word.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
         cur.execute(f"""
             SELECT DISTINCT s.jpn_text, s.trans_text
             FROM words w
             JOIN sentences s ON w.sentence_id = s.id
             WHERE {token_query}
-              AND s.jpn_text LIKE ?
-        """, (primary_token, f"%{word}%"))
+              AND s.jpn_text LIKE ? ESCAPE '\\'
+        """, (primary_token, f"%{safe_word}%"))
         results = cur.fetchall()
         if conn is None:
             local_conn.close()
