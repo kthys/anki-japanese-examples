@@ -220,6 +220,110 @@ class TestJapaneseExamples(unittest.TestCase):
 
         self.assertIsInstance(result, str)
 
+    # ── jpn_id and has_audio fields ─────────────────────────────────
+
+    def test_sentence_dict_contains_jpn_id(self):
+        """jpn_id should be the str-cast sentence id from API response."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'results': [
+                {
+                    'id': 8858176,
+                    'text': '猫だ！',
+                    'transcriptions': [{'needsReview': False}],
+                    'translations': [[{'text': 'It is a cat!'}]],
+                    'audios': [],
+                }
+            ]
+        }
+        self.mock_session.get.return_value = mock_response
+        result = self.japanese_examples.find_japanese_sentence("猫", "eng")
+        self.assertIsInstance(result, list)
+        self.assertIn('jpn_id', result[0])
+        self.assertEqual(result[0]['jpn_id'], "8858176")
+        self.assertIsInstance(result[0]['jpn_id'], str)
+
+    def test_sentence_dict_jpn_id_none_when_id_absent(self):
+        """jpn_id should be None when API result has no 'id' key."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'results': [
+                {
+                    'text': '猫だ！',
+                    'transcriptions': [{'needsReview': False}],
+                    'translations': [[{'text': 'It is a cat!'}]],
+                    'audios': [],
+                }
+            ]
+        }
+        self.mock_session.get.return_value = mock_response
+        result = self.japanese_examples.find_japanese_sentence("猫", "eng")
+        self.assertIsInstance(result, list)
+        self.assertIsNone(result[0]['jpn_id'])
+
+    def test_sentence_dict_has_audio_true_when_audios_non_empty(self):
+        """has_audio should be True when audios array is non-empty."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'results': [
+                {
+                    'id': 8858176,
+                    'text': '猫だ！',
+                    'transcriptions': [{'needsReview': False}],
+                    'translations': [[{'text': 'It is a cat!'}]],
+                    'audios': [{'id': 1046383, 'author': 'CVjpn1'}],
+                }
+            ]
+        }
+        self.mock_session.get.return_value = mock_response
+        result = self.japanese_examples.find_japanese_sentence("猫", "eng")
+        self.assertIsInstance(result, list)
+        self.assertTrue(result[0]['has_audio'])
+        self.assertIsInstance(result[0]['has_audio'], bool)
+
+    def test_sentence_dict_has_audio_false_when_audios_empty(self):
+        """has_audio should be False when audios array is empty."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'results': [
+                {
+                    'id': 8858176,
+                    'text': '猫だ！',
+                    'transcriptions': [{'needsReview': False}],
+                    'translations': [[{'text': 'It is a cat!'}]],
+                    'audios': [],
+                }
+            ]
+        }
+        self.mock_session.get.return_value = mock_response
+        result = self.japanese_examples.find_japanese_sentence("猫", "eng")
+        self.assertIsInstance(result, list)
+        self.assertFalse(result[0]['has_audio'])
+        self.assertIsInstance(result[0]['has_audio'], bool)
+
+    def test_sentence_dict_has_audio_false_when_audios_key_absent(self):
+        """has_audio should be False when API result has no 'audios' key."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'results': [
+                {
+                    'id': 8858176,
+                    'text': '猫だ！',
+                    'transcriptions': [{'needsReview': False}],
+                    'translations': [[{'text': 'It is a cat!'}]],
+                }
+            ]
+        }
+        self.mock_session.get.return_value = mock_response
+        result = self.japanese_examples.find_japanese_sentence("猫", "eng")
+        self.assertIsInstance(result, list)
+        self.assertFalse(result[0]['has_audio'])
+
     # ── max_results capping ─────────────────────────────────────────
 
     def test_results_capped_at_max_results(self):

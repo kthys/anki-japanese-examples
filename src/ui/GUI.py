@@ -13,6 +13,14 @@ try:
 except ImportError:
     from src.core.japanese_examples import find_japanese_sentence, DST_FIELD_TRANSLATION, DST_FIELD_JAP
 
+try:
+    from ..core.audio_fetcher import download_audio
+except ImportError:
+    try:
+        from src.core.audio_fetcher import download_audio
+    except ImportError:
+        download_audio = None
+
 # Try to import QueryOp for background operations (Anki 2.1.50+)
 try:
     from aqt.operations import QueryOp
@@ -306,7 +314,10 @@ def add_example_manually_dialog(editor):
 
             else:
                 try:
-                    examples = [f"{example['jp_sentence']}\n{example['tr_sentence']}" for example in examples_sentences]
+                    examples = [
+                        ("🔊 " if example.get('has_audio') else "") + f"{example['jp_sentence']}\n{example['tr_sentence']}"
+                        for example in examples_sentences
+                    ]
                 except TypeError:
                     showInfo(_('example_not_found_check_encoding'))
                     return
@@ -331,7 +342,18 @@ def add_example_manually_dialog(editor):
                         valid_field_pairs.append((field_names.index(jp_f), field_names.index(tr_f)))
                     
                     if not valid_field_pairs:
-                        showInfo(_("No valid destination fields found in the current note schema. Please check your configuration."))
+                        missing = []
+                        if jp_f not in field_names:
+                            missing.append(f"'{jp_f}' (Japanese)")
+                        if tr_f not in field_names:
+                            missing.append(f"'{tr_f}' (Translation)")
+                        available = ", ".join(field_names)
+                        showInfo(
+                            _("no_valid_dst_fields").format(
+                                missing=", ".join(missing),
+                                available=available
+                            )
+                        )
                         return
 
                     # User chooses which example to add
@@ -361,6 +383,40 @@ def add_example_manually_dialog(editor):
 
                     # Update the editor to show the changes
                     editor.loadNote()
+
+                    # Audio write path
+                    audio_f = current_config.get("audioDstField", "")
+                    if audio_f and audio_f in field_names and download_audio is not None:
+                        audio_field_index = field_names.index(audio_f)
+                        chosen_jpn_id = chosen_example.get('jpn_id')
+                        if chosen_jpn_id is not None:
+                            audio_op = None
+
+                            def on_audio_success(_unused):
+                                if audio_op:
+                                    _active_ops.discard(audio_op)
+                                fname = download_audio(chosen_jpn_id, mw.col)
+                                if fname is not None:
+                                    note.fields[audio_field_index] = f"[sound:{fname}]"
+                                    if note.id != 0:
+                                        mw.col.update_note(note)
+                                    editor.loadNote()
+
+                            def on_audio_failure(exc):
+                                if audio_op:
+                                    _active_ops.discard(audio_op)
+                                # Silent skip — no error dialog
+
+                            if QueryOp:
+                                audio_op = QueryOp(
+                                    parent=editor.parentWindow,
+                                    op=lambda col: None,
+                                    success=on_audio_success
+                                ).failure(on_audio_failure)
+                                _active_ops.add(audio_op)
+                                audio_op.run_in_background()
+                            else:
+                                on_audio_success(None)
 
                 show_result_dialog()
 

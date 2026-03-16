@@ -74,5 +74,68 @@ class TestI18n(unittest.TestCase):
         translator_fr = i18n.SimpleTranslator('fr_FR')
         self.assertEqual(translator_fr.gettext('searching'), 'Recherche...')
 
+class TestLocaleAudioKeys(unittest.TestCase):
+    """Verify that all new audio-feature locale keys are present in both en.json and fr.json."""
+
+    def setUp(self):
+        # same patcher pattern as TestI18n
+        self.mock_mw = MagicMock()
+        self.mock_aqt = MagicMock()
+        self.mock_aqt.mw = self.mock_mw
+        self.patcher = patch.dict(sys.modules, {
+            'aqt': self.mock_aqt,
+            'aqt.mw': self.mock_mw,
+        })
+        self.patcher.start()
+        if 'src.utils.i18n' in sys.modules:
+            del sys.modules['src.utils.i18n']
+
+    def tearDown(self):
+        self.patcher.stop()
+        if 'src.utils.i18n' in sys.modules:
+            del sys.modules['src.utils.i18n']
+
+    def test_audio_label_keys_present_in_en(self):
+        """batch_audio_field_label_1/_2/_3 must be translateable in en locale."""
+        import src.utils.i18n as i18n
+        translator = i18n.SimpleTranslator('en')
+        for idx in range(1, 4):
+            key = f"batch_audio_field_label_{idx}"
+            value = translator.gettext(key)
+            # If key is absent, gettext returns the key itself — fail the test
+            self.assertNotEqual(
+                value, key,
+                f"Missing en.json key: {key}"
+            )
+
+    def test_audio_label_keys_present_in_fr(self):
+        """batch_audio_field_label_1/_2/_3 must be translateable in fr locale."""
+        import src.utils.i18n as i18n
+        translator = i18n.SimpleTranslator('fr')
+        for idx in range(1, 4):
+            key = f"batch_audio_field_label_{idx}"
+            value = translator.gettext(key)
+            self.assertNotEqual(
+                value, key,
+                f"Missing fr.json key: {key}"
+            )
+
+    def test_report_body_has_audio_added_placeholder_en(self):
+        """batch_report_body in en.json must contain {audio_added} and {audio_skipped}."""
+        import src.utils.i18n as i18n
+        translator = i18n.SimpleTranslator('en')
+        body = translator.gettext('batch_report_body')
+        self.assertIn('{audio_added}', body)
+        self.assertIn('{audio_skipped}', body)
+
+    def test_report_body_has_audio_added_placeholder_fr(self):
+        """batch_report_body in fr.json must contain {audio_added} and {audio_skipped}."""
+        import src.utils.i18n as i18n
+        translator = i18n.SimpleTranslator('fr')
+        body = translator.gettext('batch_report_body')
+        self.assertIn('{audio_added}', body)
+        self.assertIn('{audio_skipped}', body)
+
+
 if __name__ == '__main__':
     unittest.main()

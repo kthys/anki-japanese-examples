@@ -234,5 +234,172 @@ class TestGUIAsync(unittest.TestCase):
 
         mock_showInfo.assert_called_once()
 
+class TestGUIAudioField(unittest.TestCase):
+
+    def setUp(self):
+        # Duplicate TestGUIAsync setUp verbatim
+        self.mock_aqt = MagicMock()
+        self.mock_mw = MagicMock()
+        self.mock_operations = MagicMock()
+        self.mock_utils = MagicMock()
+        self.mock_gui_hooks = MagicMock()
+        self.mock_pyqt5 = MagicMock()
+        self.mock_pyqt5_qtcore = MagicMock()
+        self.mock_pyqt5.QtCore = self.mock_pyqt5_qtcore
+        self.mock_pyqt5_qtcore.QTimer = MagicMock()
+
+        self.modules_patcher = patch.dict(sys.modules, {
+            'aqt': self.mock_aqt,
+            'aqt.mw': self.mock_mw,
+            'aqt.operations': self.mock_operations,
+            'aqt.utils': self.mock_utils,
+            'aqt.gui_hooks': self.mock_gui_hooks,
+            'aqt.qt': MagicMock(),
+            'PyQt5': self.mock_pyqt5,
+            'PyQt5.QtCore': self.mock_pyqt5_qtcore
+        })
+        self.modules_patcher.start()
+
+        self.mock_mw.pm.meta.get.return_value = 'en'
+        self.mock_mw.col.path = "/path/to/collection.anki2"
+        self.mock_mw.progress.busy.return_value = False
+        self.mock_aqt.mw = self.mock_mw
+
+        self.mock_config = {
+            "japaneseDstField": "Expression",
+            "translationDstField": "Meaning",
+            "audioDstField": "Audio",
+            "deck_preferences": {}
+        }
+        self.mock_mw.addonManager.getConfig.return_value = self.mock_config
+
+        self.mock_utils.Qt = MagicMock()
+        self.mock_utils.Qt.WindowModality.WindowModal = 1
+        self.mock_utils.Qt.__module__ = 'PyQt5.QtCore'
+
+        self.mock_japanese_examples = MagicMock()
+        self.mock_japanese_examples.DST_FIELD_JAP = 'Expression'
+        self.mock_japanese_examples.DST_FIELD_TRANSLATION = 'Meaning'
+        sys.modules['src.core.japanese_examples'] = self.mock_japanese_examples
+
+        # Mock audio_fetcher module at the boundary
+        self.mock_audio_fetcher = MagicMock()
+        self.mock_download_audio = MagicMock(return_value="8858176.mp3")
+        self.mock_audio_fetcher.download_audio = self.mock_download_audio
+        sys.modules['src.core.audio_fetcher'] = self.mock_audio_fetcher
+
+        if 'src.ui.GUI' in sys.modules:
+            del sys.modules['src.ui.GUI']
+        import src.ui.GUI as GUI
+        self.GUI = GUI
+
+    def tearDown(self):
+        self.modules_patcher.stop()
+        if 'src.ui.GUI' in sys.modules:
+            del sys.modules['src.ui.GUI']
+        if 'src.core.audio_fetcher' in sys.modules:
+            del sys.modules['src.core.audio_fetcher']
+
+    def _make_editor(self, fields=None, field_names=None):
+        """Helper: build a mock editor with the given fields and field names."""
+        editor = MagicMock()
+        editor.web.editor.currentField = 0
+        editor.note.fields = fields or ['test_word', '', '', '']
+        editor.note.id = 1  # non-zero so update_note is called
+        editor.note.note_type.return_value = {
+            'flds': [
+                {'name': n} for n in (field_names or ['Expression', 'Meaning', 'Reading', 'Audio'])
+            ]
+        }
+        return editor
+
+    def _run_flow(self, editor, examples_sentences, dialog_side_effects=None):
+        """
+        Simulate the full add_example_manually_dialog flow:
+        1. Call add_example_manually_dialog(editor)
+        2. Retrieve and invoke the QueryOp success callback with examples_sentences
+        3. Invoke the QTimer scheduled callback to run show_result_dialog
+        Returns the GUI module for further assertions.
+        """
+        with patch('src.ui.GUI.find_japanese_sentence', return_value=examples_sentences), \
+             patch('src.ui.GUI.create_custom_dialog') as mock_dialog, \
+             patch('src.ui.GUI.showInfo'):
+
+            # Language dialog -> English no save; example selection -> index 0
+            mock_dialog.side_effect = dialog_side_effects or [(0, False), 0]
+
+            self.GUI.add_example_manually_dialog(editor)
+
+            # Invoke QueryOp success callback
+            call_args = self.mock_operations.QueryOp.call_args
+            _, kwargs = call_args
+            success_callback = kwargs['success']
+            success_callback(examples_sentences)
+
+            # Invoke QTimer scheduled function
+            timer_call_args = self.mock_pyqt5_qtcore.QTimer.singleShot.call_args[0]
+            timer_call_args[1]()
+
+    @patch('src.ui.GUI.showInfo')
+    def test_audio_field_written_when_configured_and_recording_exists(self, mock_showInfo):
+        """Audio field gets [sound:filename.mp3] when audioDstField configured and recording exists."""
+        examples_sentences = [
+            {'jp_sentence': 'JP1', 'tr_sentence': 'TR1', 'jpn_id': '8858176', 'has_audio': True}
+        ]
+        editor = self._make_editor()
+        self._run_flow(editor, examples_sentences)
+
+        # Simulate second QueryOp (audio) on_success callback
+        # Find the second QueryOp call (audio op)
+        audio_op_call = self.mock_operations.QueryOp.call_args_list[-1]
+        _, audio_kwargs = audio_op_call
+        audio_success = audio_kwargs['success']
+        audio_success(None)
+
+        self.assertEqual(editor.note.fields[3], "[sound:8858176.mp3]")
+        mock_showInfo.assert_not_called()
+
+    @patch('src.ui.GUI.showInfo')
+    def test_audio_field_empty_when_no_recording(self, mock_showInfo):
+        """Audio field stays empty when download_audio returns None."""
+        self.mock_download_audio.return_value = None
+        examples_sentences = [
+            {'jp_sentence': 'JP1', 'tr_sentence': 'TR1', 'jpn_id': '8858176', 'has_audio': False}
+        ]
+        editor = self._make_editor()
+        self._run_flow(editor, examples_sentences)
+
+        audio_op_call = self.mock_operations.QueryOp.call_args_list[-1]
+        _, audio_kwargs = audio_op_call
+        audio_success = audio_kwargs['success']
+        audio_success(None)
+
+        self.assertNotEqual(editor.note.fields[3], "[sound:8858176.mp3]")
+        mock_showInfo.assert_not_called()
+
+    @patch('src.ui.GUI.showInfo')
+    def test_audio_skipped_when_not_configured(self, mock_showInfo):
+        """download_audio is never called when audioDstField is absent from config."""
+        self.mock_config.pop("audioDstField", None)
+        examples_sentences = [
+            {'jp_sentence': 'JP1', 'tr_sentence': 'TR1', 'jpn_id': '8858176', 'has_audio': True}
+        ]
+        editor = self._make_editor()
+        self._run_flow(editor, examples_sentences)
+
+        self.mock_download_audio.assert_not_called()
+
+    @patch('src.ui.GUI.showInfo')
+    def test_audio_skipped_when_jpn_id_none(self, mock_showInfo):
+        """download_audio is never called when jpn_id is None."""
+        examples_sentences = [
+            {'jp_sentence': 'JP1', 'tr_sentence': 'TR1', 'jpn_id': None, 'has_audio': False}
+        ]
+        editor = self._make_editor()
+        self._run_flow(editor, examples_sentences)
+
+        self.mock_download_audio.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()

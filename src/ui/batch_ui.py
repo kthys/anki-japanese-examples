@@ -1,5 +1,5 @@
 from aqt import mw
-from aqt.utils import QDialog, QVBoxLayout, QLabel, QDialogButtonBox, showInfo
+from aqt.utils import QDialog, QVBoxLayout, QLabel, QDialogButtonBox, showInfo, showWarning
 from aqt.qt import QComboBox, QCheckBox, QPushButton, QHBoxLayout, QAction, QTextEdit, QProgressBar
 from aqt.operations import QueryOp
 
@@ -161,6 +161,7 @@ class BatchDialog(QDialog):
 
         self.jpn_field_combos = []
         self.trans_field_combos = []
+        self.audio_field_combos = []
         self.field_pair_widgets = []
 
         # Wrap everything in an HBox
@@ -252,17 +253,29 @@ class BatchDialog(QDialog):
             
         self.fields_container.addWidget(row_widget)
         
+        # Audio row — follows the exact same QHBoxLayout pattern as jpn and trans rows
+        # NOTE: audio combo does NOT connect to _validate_run_button — audio is optional
+        audio_layout = QHBoxLayout()
+        audio_label = QLabel(_(f"batch_audio_field_label_{idx}"))
+        audio_combo = QComboBox()
+        audio_layout.addWidget(audio_label)
+        audio_layout.addWidget(audio_combo)
+        row_layout.addLayout(audio_layout)
+
         self.field_pair_widgets.append(row_widget)
         self.jpn_field_combos.append(jpn_combo)
         self.trans_field_combos.append(trans_combo)
-        
+        self.audio_field_combos.append(audio_combo)
+
         # Populate combinations if we already have field names
         jpn_combo.addItem(_("batch_field_none"))
         trans_combo.addItem(_("batch_field_none"))
+        audio_combo.addItem(_("batch_field_none"))
         if hasattr(self, 'current_field_names') and self.current_field_names:
             jpn_combo.addItems(self.current_field_names)
             trans_combo.addItems(self.current_field_names)
-            
+            audio_combo.addItems(self.current_field_names)
+
         self._update_buttons()
 
     def _remove_last_field_pair(self):
@@ -275,12 +288,16 @@ class BatchDialog(QDialog):
         
         self.jpn_field_combos.pop()
         self.trans_field_combos.pop()
-        
+        self.audio_field_combos.pop()
+
         self._update_buttons()
-        
+
         # Ask the layout to reconsider its size, then shrink window
-        self.layout().activate()
-        self.adjustSize()
+        try:
+            self.layout().activate()
+            self.adjustSize()
+        except Exception:
+            pass
 
     def _update_buttons(self):
         self.minus_btn.setEnabled(len(self.field_pair_widgets) > 1)
@@ -329,6 +346,8 @@ class BatchDialog(QDialog):
             jpn_combo.clear()
         for trans_combo in getattr(self, "trans_field_combos", []):
             trans_combo.clear()
+        for audio_combo in getattr(self, "audio_field_combos", []):
+            audio_combo.clear()
         self.deck_status_label.hide()
 
         deck_id = self.deck_combo.currentData()
@@ -350,10 +369,14 @@ class BatchDialog(QDialog):
             for jpn_combo in self.jpn_field_combos:
                 jpn_combo.addItem(_("batch_field_none"))
                 jpn_combo.addItems(self.current_field_names)
-                
+
             for trans_combo in self.trans_field_combos:
                 trans_combo.addItem(_("batch_field_none"))
                 trans_combo.addItems(self.current_field_names)
+
+            for audio_combo in self.audio_field_combos:
+                audio_combo.addItem(_("batch_field_none"))
+                audio_combo.addItems(self.current_field_names)
         except Exception:
             pass
 
@@ -456,7 +479,7 @@ class BatchDialog(QDialog):
             return tatoeba_data.download_tatoeba_data(lang, progress_callback=progress_callback)
 
         def on_success(result):
-            _active_ops.remove(op)
+            _active_ops.discard(op)
 
             def safe_execute(callback):
                 def check_and_run():
@@ -479,7 +502,11 @@ class BatchDialog(QDialog):
 
             safe_execute(finish_download)
 
-        op = QueryOp(parent=self, op=background_func, success=on_success)
+        def on_failure(exc):
+            _active_ops.discard(op)
+            showWarning(f"Operation failed: {exc}")
+
+        op = QueryOp(parent=self, op=background_func, success=on_success).failure(on_failure)
         _active_ops.add(op)
         op.run_in_background()
 
@@ -513,15 +540,18 @@ class BatchDialog(QDialog):
         skip_existing = self.skip_checkbox.isChecked()
 
         dest_field_pairs = []
-        for jpn_combo, trans_combo in zip(self.jpn_field_combos, self.trans_field_combos):
+        for jpn_combo, trans_combo, audio_combo in zip(
+                self.jpn_field_combos, self.trans_field_combos, self.audio_field_combos):
             jpn_dest = jpn_combo.currentText()
             trans_dest = trans_combo.currentText()
-            
+            audio_dest = audio_combo.currentText()
+
             jpn_set = jpn_dest and jpn_dest != _("batch_field_none")
             trans_set = trans_dest and trans_dest != _("batch_field_none")
-            
+            audio_set = audio_dest and audio_dest != _("batch_field_none")
+
             if jpn_set and trans_set:
-                dest_field_pairs.append((jpn_dest, trans_dest))
+                dest_field_pairs.append((jpn_dest, trans_dest, audio_dest if audio_set else None))
 
         if not source_field or not dest_field_pairs:
             translated = _("batch_no_fields")
@@ -544,7 +574,7 @@ class BatchDialog(QDialog):
             )
 
         def on_success(result):
-            _active_ops.remove(op)
+            _active_ops.discard(op)
 
             def safe_execute(callback):
                 def check_and_run():
@@ -553,6 +583,8 @@ class BatchDialog(QDialog):
                     else:
                         callback()
                 check_and_run()
+
+            batch_engine.process_pending_audio(result, mw.col)
 
             def show_report():
                 # Build report
@@ -566,6 +598,8 @@ class BatchDialog(QDialog):
                         skipped_no_match=result.skipped_no_match,
                         skipped_missing=result.skipped_missing_fields,
                         errors=result.errors,
+                        audio_added=result.audio_added,
+                        audio_skipped=result.audio_skipped,
                     )
                 else:
                     report = (
@@ -574,7 +608,9 @@ class BatchDialog(QDialog):
                         f"Skipped (already have examples): {result.skipped_existing}\n"
                         f"Skipped (no match found): {result.skipped_no_match}\n"
                         f"Skipped (missing fields): {result.skipped_missing_fields}\n"
-                        f"Errors: {result.errors}"
+                        f"Errors: {result.errors}\n"
+                        f"Audio added: {result.audio_added}\n"
+                        f"Audio skipped (no recording): {result.audio_skipped}"
                     )
 
                 showInfo(report)
@@ -582,13 +618,17 @@ class BatchDialog(QDialog):
 
             safe_execute(show_report)
 
-        op = QueryOp(parent=self, op=background_func, success=on_success)
+        def on_failure(exc):
+            _active_ops.discard(op)
+            showWarning(f"Operation failed: {exc}")
+
+        op = QueryOp(parent=self, op=background_func, success=on_success).failure(on_failure)
         _active_ops.add(op)
-        
+
         progress_msg = _("batch_running")
         if progress_msg == "batch_running":
             progress_msg = "Running batch process..."
-        
+
         op.with_progress(progress_msg).run_in_background()
 
 

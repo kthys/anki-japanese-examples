@@ -11,6 +11,17 @@ try:
 except ImportError:
     import tatoeba_data
 
+try:
+    from . import audio_fetcher
+    from .audio_fetcher import AudioDownloadError
+except ImportError:
+    try:
+        import audio_fetcher
+        from audio_fetcher import AudioDownloadError
+    except ImportError:
+        audio_fetcher = None  # type: ignore
+        AudioDownloadError = Exception  # type: ignore
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,12 +52,24 @@ class BatchResult:
     - skipped_no_match (int): Notes skipped because no matching sentence was found.
     - skipped_missing_fields (int): Notes skipped due to missing source or destination fields.
     - errors (int): Notes where an unexpected error occurred during processing.
+    - audio_added (int): Populated by on_success after main-thread download; sentences with audio
+      successfully registered.
+    - audio_skipped (int): Populated by on_success; sentences where Tatoeba returned 404
+      (no recording).
+    - audio_errors (int): Populated by on_success; sentences where download raised
+      AudioDownloadError.
+    - pending_audio (list[tuple[str, int, str]]): Staging list of (jpn_id, note_id, audio_field)
+      triples accumulated by run_batch() and drained by on_success on the main thread.
     """
     updated: int = 0
     skipped_existing: int = 0
     skipped_no_match: int = 0
     skipped_missing_fields: int = 0
     errors: int = 0
+    audio_added: int = 0
+    audio_skipped: int = 0
+    audio_errors: int = 0
+    pending_audio: list = field(default_factory=list)
 
     @property
     def total_processed(self) -> int:
@@ -55,12 +78,54 @@ class BatchResult:
                 + self.skipped_missing_fields + self.errors)
 
 
+def process_pending_audio(result: BatchResult, col) -> None:
+    """Drain result.pending_audio on the main thread.
+
+    PRECONDITION: Must be called from the main thread.
+    Called by batch_ui.py's on_success handler after run_batch() completes.
+
+    For each (jpn_id, note_id, audio_field) triple in result.pending_audio:
+    - Calls audio_fetcher.download_audio(jpn_id, col)
+    - On success: writes [sound:fname] verbatim to the audio field, calls col.update_note,
+      increments result.audio_added
+    - On None (404): leaves audio field empty, increments result.audio_skipped
+    - On AudioDownloadError: leaves audio field empty, logs error, increments result.audio_errors
+    - On missing audio field: increments result.audio_errors, logs warning
+
+    Clears result.pending_audio after processing.
+    """
+    if audio_fetcher is None:
+        logger.error("audio_fetcher module not available — skipping audio processing")
+        return
+
+    for jpn_id, note_id, audio_field in result.pending_audio:
+        try:
+            note = col.get_note(note_id)
+            field_names = [fld["name"] for fld in note.note_type()["flds"]]
+            if audio_field not in field_names:
+                result.audio_errors += 1
+                logger.warning("Audio field %r not found on note %d", audio_field, note_id)
+                continue
+            fname = audio_fetcher.download_audio(jpn_id, col)
+            if fname is None:
+                result.audio_skipped += 1
+            else:
+                audio_idx = field_names.index(audio_field)
+                note.fields[audio_idx] = f"[sound:{fname}]"
+                col.update_note(note)
+                result.audio_added += 1
+        except AudioDownloadError as exc:
+            result.audio_errors += 1
+            logger.error("Audio download error for jpn_id %s: %s", jpn_id, exc)
+    result.pending_audio.clear()
+
+
 def run_batch(
     col,
     deck_id: int,
     lang_label: str,
     source_field: str,
-    dest_field_pairs: list[tuple[str, str]],
+    dest_field_pairs: list[tuple[str, str, str | None]],
     skip_existing: bool = True,
 ) -> BatchResult:
     """
@@ -76,8 +141,9 @@ def run_batch(
     - deck_id (int): The ID of the deck to process.
     - lang_label (str): Language label for Tatoeba data (e.g. 'English', 'French').
     - source_field (str): Name of the note field containing the word to search.
-    - dest_field_pairs (list[tuple[str, str]]): List of tuples containing the (Japanese, Translation)
-      destination field names.
+    - dest_field_pairs (list[tuple[str, str, str | None]]): List of triples of (Japanese,
+      Translation, Audio) destination field names. The audio element is the destination field name
+      for the [sound:] tag, or None if no audio is configured for this pair.
     - skip_existing (bool): If True, skip notes that already have content in the
       FIRST destination field pair. Default is True.
 
@@ -119,7 +185,7 @@ def run_batch(
                 
                 # Verify all destination fields exist
                 fields_missing = False
-                for jpn_dest, trans_dest in dest_field_pairs:
+                for jpn_dest, trans_dest, audio_dest in dest_field_pairs:
                     if jpn_dest not in field_names or trans_dest not in field_names:
                         fields_missing = True
                         break
@@ -137,7 +203,7 @@ def run_batch(
                     continue
 
                 # Check skip_existing based on the FIRST field pair
-                first_jpn_dest, first_trans_dest = dest_field_pairs[0]
+                first_jpn_dest, first_trans_dest, _ = dest_field_pairs[0]
                 first_jpn_idx = field_names.index(first_jpn_dest)
                 first_trans_idx = field_names.index(first_trans_dest)
 
@@ -157,13 +223,15 @@ def run_batch(
                 selected_matches = random.sample(matches, num_to_select)
 
                 # Write HTML-escaped results
-                for i, (jpn_text, trans_text) in enumerate(selected_matches):
-                    jpn_idx = field_names.index(dest_field_pairs[i][0])
-                    trans_idx = field_names.index(dest_field_pairs[i][1])
-                    
+                for i, (jpn_id, jpn_text, trans_text) in enumerate(selected_matches):
+                    jpn_field, trans_field, audio_field = dest_field_pairs[i]
+                    jpn_idx = field_names.index(jpn_field)
+                    trans_idx = field_names.index(trans_field)
                     note.fields[jpn_idx] = html.escape(jpn_text)
                     note.fields[trans_idx] = html.escape(trans_text)
-                    
+                    if audio_field is not None:
+                        result.pending_audio.append((jpn_id, nid, audio_field))
+
                 col.update_note(note)
                 result.updated += 1
 

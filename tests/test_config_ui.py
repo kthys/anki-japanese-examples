@@ -137,5 +137,40 @@ class TestConfigUI(unittest.TestCase):
             mock_dialog_instance.exec.assert_called_once()
 
 
+    # ── audio field ─────────────────────────────────────────────────
+
+    def test_audio_field_widget_shown_in_dialog(self):
+        """Should create an audio_field QLineEdit widget during setup."""
+        dialog = self.config_ui.ConfigDialog()
+        self.assertIsNotNone(dialog.audio_field)
+
+    def test_audio_field_default_value(self):
+        """Should initialize audio_field with 'ExampleAudio' when audioDstField absent from config."""
+        config_without_audio = {
+            "japaneseDstField": "ExampleJapanese",
+            "translationDstField": "ExampleTranslated",
+        }
+        self.mock_mw.addonManager.getConfig.return_value = config_without_audio
+        if 'src.ui.config_ui' in sys.modules:
+            del sys.modules['src.ui.config_ui']
+        import src.ui.config_ui as config_ui_fresh
+        config_ui_fresh.ConfigDialog()
+        call_args = [c.args[0] for c in self.mock_qt.QLineEdit.call_args_list if c.args]
+        self.assertIn("ExampleAudio", call_args)
+
+    def test_save_config_writes_audio_dst_field(self):
+        """Should write audioDstField to config on save."""
+        dialog = self.config_ui.ConfigDialog()
+        dialog.jp_field = MagicMock()
+        dialog.jp_field.text.return_value = "JF"
+        dialog.tr_field = MagicMock()
+        dialog.tr_field.text.return_value = "TF"
+        dialog.audio_field = MagicMock()
+        dialog.audio_field.text.return_value = "MyAudio"
+        dialog.config = {}
+        dialog.save_config()
+        self.assertEqual(dialog.config["audioDstField"], "MyAudio")
+
+
 if __name__ == '__main__':
     unittest.main()
