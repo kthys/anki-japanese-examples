@@ -16,6 +16,7 @@
     "settings_dialog_title": "Japanese Examples Addon Settings",
     "japanese_field_label": "Japanese Field Name:",
     "translation_field_label": "Translation Field Name:",
+    "audio_field_label": "Audio Field Name:",
     "deck_preferences_reset": "Deck preferences have been reset.",
     "deck_preference_info_tooltip": "This preference can be reset in the addon's settings.",
     "batch_menu_action": "Batch process examples",
@@ -36,7 +37,7 @@
     "batch_jpn_field_label": "Japanese example field:",
     "batch_trans_field_label": "Translated example field:",
     "batch_report_title": "Batch Processing Report",
-    "batch_report_body": "Batch processing complete.\n\nUpdated: {updated}\nSkipped (already have examples): {skipped_existing}\nSkipped (no match found): {skipped_no_match}\nSkipped (missing fields): {skipped_missing}\nErrors: {errors}",
+    "batch_report_body": "Batch processing complete.\n\nUpdated: {updated}\nSkipped (already have examples): {skipped_existing}\nSkipped (no match found): {skipped_no_match}\nSkipped (missing fields): {skipped_missing}\nErrors: {errors}\nAudio added: {audio_added}\nAudio skipped (no recording): {audio_skipped}",
     "batch_no_data": "No Tatoeba data available. Please download data first.",
     "batch_no_fields": "No fields available. Please select a deck with notes.",
     "batch_progress_title": "Downloading Data",
@@ -51,9 +52,13 @@
     "batch_trans_field_label_1": "Translated example field 1:",
     "batch_trans_field_label_2": "Translated example field 2:",
     "batch_trans_field_label_3": "Translated example field 3:",
+    "batch_audio_field_label_1": "Audio field 1:",
+    "batch_audio_field_label_2": "Audio field 2:",
+    "batch_audio_field_label_3": "Audio field 3:",
     "batch_running": "Running batch process...",
     "batch_language_english": "English",
     "batch_language_french": "French",
     "batch_field_none": "-- None --",
-    "batch_error_incomplete_pair": "Please select both a Japanese and Translation field for each pair, or set both to '-- None --'."
+    "batch_error_incomplete_pair": "Please select both a Japanese and Translation field for each pair, or set both to '-- None --'.",
+    "no_valid_dst_fields": "Field(s) {missing} not found in this note type.\nAvailable fields: {available}\n\nPlease update your field names in the addon configuration."
 }

@@ -188,8 +188,8 @@ class TestTatoebaData(unittest.TestCase):
         # Search for 猫 — should find sentence 1
         results = tatoeba_data.search_word(db_path, "猫")
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0][0], "猫が好きです。")
-        self.assertEqual(results[0][1], "I like cats.")
+        self.assertEqual(results[0][1], "猫が好きです。")
+        self.assertEqual(results[0][2], "I like cats.")
 
         # Search for 好 — should find sentences 1 and 2 (shared kanji)
         results = tatoeba_data.search_word(db_path, "好")
@@ -211,14 +211,14 @@ class TestTatoebaData(unittest.TestCase):
 
         # 火 should NOT match 花火 (花火 is a single kanji-run token)
         results = tatoeba_data.search_word(db_path, "火")
-        jpn_texts = [r[0] for r in results]
+        jpn_texts = [r[1] for r in results]
         self.assertIn("火が燃えている。", jpn_texts)
         self.assertNotIn("花火が綺麗だ。", jpn_texts)
 
         # 花火 should match sentence 1
         results = tatoeba_data.search_word(db_path, "花火")
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0][0], "花火が綺麗だ。")
+        self.assertEqual(results[0][1], "花火が綺麗だ。")
 
         # Clean up
         os.remove(db_path)
@@ -238,21 +238,40 @@ class TestTatoebaData(unittest.TestCase):
 
         # 負ける should match 負けるな but not 負けました
         results = tatoeba_data.search_word(db_path, "負ける")
-        jpn_texts = [r[0] for r in results]
+        jpn_texts = [r[1] for r in results]
         self.assertIn("試験に負けるな。", jpn_texts)
         self.assertNotIn("もう負けました。", jpn_texts)
 
         # 間もなく should match (mixed tokens '間' and 'もなく')
         results = tatoeba_data.search_word(db_path, "間もなく")
-        jpn_texts = [r[0] for r in results]
+        jpn_texts = [r[1] for r in results]
         self.assertIn("間もなく電車が来ます。", jpn_texts)
 
         # ありがとう should match ありがとうございます (kana prefix match)
         results = tatoeba_data.search_word(db_path, "ありがとう")
-        jpn_texts = [r[0] for r in results]
+        jpn_texts = [r[1] for r in results]
         self.assertIn("ありがとうございます。", jpn_texts)
 
         # Clean up
+        os.remove(db_path)
+
+    def test_search_word_returns_jpn_id(self):
+        """search_word must return (jpn_id, jpn_text, trans_text) triples where jpn_id matches the sentences table."""
+        tsv_path = os.path.join(self.temp_dir, "jpnid_pairs.tsv")
+        db_path = os.path.join(self.temp_dir, "jpnid_index.db")
+
+        with open(tsv_path, "w", encoding="utf-8") as f:
+            f.write("42\t猫が好きです。\t100\tI like cats.\n")
+
+        tatoeba_data.build_sqlite_index(tsv_path, db_path)
+        results = tatoeba_data.search_word(db_path, "猫")
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(len(results[0]), 3)           # triple, not pair
+        self.assertEqual(results[0][0], "42")          # jpn_id matches sentences table
+        self.assertEqual(results[0][1], "猫が好きです。")
+        self.assertEqual(results[0][2], "I like cats.")
+
         os.remove(db_path)
 
     def test_search_word_missing_db(self):

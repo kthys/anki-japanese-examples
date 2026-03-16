@@ -91,7 +91,13 @@ def find_japanese_sentence(word, translation_language='eng', max_results=50):
                 tr_sentence = translations[0][0].get('text')
 
             if jp_sentence and tr_sentence:
-                sentences.append({'jp_sentence': jp_sentence, 'tr_sentence': tr_sentence})
+                raw_id = result.get('id')
+                sentences.append({
+                    'jp_sentence': jp_sentence,
+                    'tr_sentence': tr_sentence,
+                    'jpn_id': str(raw_id) if raw_id is not None else None,
+                    'has_audio': bool(result.get('audios')),
+                })
 
         # Check if any sentences were found.
         if sentences:

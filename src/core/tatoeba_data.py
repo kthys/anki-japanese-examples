@@ -138,7 +138,7 @@ def build_sqlite_index(pairs_tsv_path: str, db_path: str) -> int:
     conn.close()
     return count
 
-def search_word(db_path: str, word: str, conn: Optional[sqlite3.Connection] = None) -> list[tuple[str, str]]:
+def search_word(db_path: str, word: str, conn: Optional[sqlite3.Connection] = None) -> list[tuple[str, str, str]]:
     """
     Search the SQLite index for sentences containing the word.
 
@@ -153,7 +153,8 @@ def search_word(db_path: str, word: str, conn: Optional[sqlite3.Connection] = No
     - conn (Optional[sqlite3.Connection]): An optional active database connection to reuse.
 
     Returns:
-    - A list of (jpn_text, trans_text) tuples for all matching sentences.
+    - A list of (jpn_id, jpn_text, trans_text) tuples for all matching sentences,
+      where jpn_id is the Tatoeba sentence ID from the sentences table.
       Returns an empty list if the database does not exist or an error occurs.
     """
     if not os.path.exists(db_path):
@@ -180,7 +181,7 @@ def search_word(db_path: str, word: str, conn: Optional[sqlite3.Connection] = No
         cur = local_conn.cursor()
         safe_word = word.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
         cur.execute(f"""
-            SELECT DISTINCT s.jpn_text, s.trans_text
+            SELECT DISTINCT s.jpn_id, s.jpn_text, s.trans_text
             FROM words w
             JOIN sentences s ON w.sentence_id = s.id
             WHERE {token_query}

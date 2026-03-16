@@ -1,7 +1,7 @@
 import sys
 import os
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call
 import tempfile
 
 # Add parent directory to path
@@ -15,7 +15,8 @@ sys.modules['aqt.qt'] = MagicMock()
 
 # Import freshly
 import src.core.batch_engine as batch_engine
-from src.core.batch_engine import BatchResult
+from src.core.batch_engine import BatchResult, process_pending_audio
+from src.core.audio_fetcher import AudioDownloadError
 
 
 class TestBatchResult(unittest.TestCase):
@@ -98,7 +99,7 @@ class TestRunBatch(unittest.TestCase):
         """run_batch should update notes when matches are found."""
         mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
-        mock_td.search_word.return_value = [("猫が好きです。", "I like cats.")]
+        mock_td.search_word.return_value = [("1", "猫が好きです。", "I like cats.")]
 
         field_order = ["Word", "ExampleJapanese", "ExampleTranslated"]
         note = self._make_mock_note(
@@ -109,7 +110,7 @@ class TestRunBatch(unittest.TestCase):
 
         result = batch_engine.run_batch(
             col=col, deck_id=1, lang_label="English",
-            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated")],
+            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated", None)],
             skip_existing=True
         )
 
@@ -135,7 +136,7 @@ class TestRunBatch(unittest.TestCase):
 
         result = batch_engine.run_batch(
             col=col, deck_id=1, lang_label="English",
-            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated")],
+            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated", None)],
             skip_existing=True
         )
 
@@ -148,7 +149,7 @@ class TestRunBatch(unittest.TestCase):
         """run_batch should overwrite existing examples when skip_existing=False."""
         mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
-        mock_td.search_word.return_value = [("新しい例。", "New example.")]
+        mock_td.search_word.return_value = [("2", "新しい例。", "New example.")]
 
         field_order = ["Word", "ExampleJapanese", "ExampleTranslated"]
         note = self._make_mock_note(
@@ -159,7 +160,7 @@ class TestRunBatch(unittest.TestCase):
 
         result = batch_engine.run_batch(
             col=col, deck_id=1, lang_label="English",
-            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated")],
+            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated", None)],
             skip_existing=False
         )
 
@@ -182,7 +183,7 @@ class TestRunBatch(unittest.TestCase):
 
         result = batch_engine.run_batch(
             col=col, deck_id=1, lang_label="English",
-            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated")]
+            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated", None)]
         )
 
         self.assertEqual(result.skipped_no_match, 1)
@@ -203,7 +204,7 @@ class TestRunBatch(unittest.TestCase):
 
         result = batch_engine.run_batch(
             col=col, deck_id=1, lang_label="English",
-            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated")]
+            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated", None)]
         )
 
         self.assertEqual(result.skipped_missing_fields, 1)
@@ -216,7 +217,7 @@ class TestRunBatch(unittest.TestCase):
         col = MagicMock()
         result = batch_engine.run_batch(
             col=col, deck_id=1, lang_label="Klingon",
-            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated")]
+            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated", None)]
         )
 
         self.assertEqual(result.total_processed, 0)
@@ -228,9 +229,9 @@ class TestRunBatch(unittest.TestCase):
         """run_batch should use random.sample when multiple matches exist."""
         mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
-        matches = [("例文A。", "Example A."), ("例文B。", "Example B.")]
+        matches = [("3", "例文A。", "Example A."), ("4", "例文B。", "Example B.")]
         mock_td.search_word.return_value = matches
-        mock_sample.return_value = [("例文B。", "Example B.")]
+        mock_sample.return_value = [("4", "例文B。", "Example B.")]
 
         field_order = ["Word", "ExampleJapanese", "ExampleTranslated"]
         note = self._make_mock_note(
@@ -241,7 +242,7 @@ class TestRunBatch(unittest.TestCase):
 
         result = batch_engine.run_batch(
             col=col, deck_id=1, lang_label="English",
-            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated")]
+            source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated", None)]
         )
 
         mock_sample.assert_called_once_with(matches, 1)
@@ -256,9 +257,9 @@ class TestRunBatch(unittest.TestCase):
         mock_td.get_db_path.return_value = self.temp_db_path
         
         matches = [
-            ("例文1。", "Example 1."),
-            ("例文2。", "Example 2."),
-            ("例文3。", "Example 3.")
+            ("5", "例文1。", "Example 1."),
+            ("6", "例文2。", "Example 2."),
+            ("7", "例文3。", "Example 3.")
         ]
         mock_td.search_word.return_value = matches
 
@@ -278,8 +279,8 @@ class TestRunBatch(unittest.TestCase):
             col=col, deck_id=1, lang_label="English",
             source_field="Word",
             dest_field_pairs=[
-                ("Jpn1", "Trans1"),
-                ("Jpn2", "Trans2")
+                ("Jpn1", "Trans1", None),
+                ("Jpn2", "Trans2", None)
             ]
         )
 
@@ -294,6 +295,197 @@ class TestRunBatch(unittest.TestCase):
         
         # Make sure they are distinct
         self.assertNotEqual(note.fields[1], note.fields[3])
+
+    @patch('src.core.batch_engine.tatoeba_data')
+    def test_run_batch_audio_field_populates_pending_audio(self, mock_td):
+        """audio_field not None causes pending_audio to accumulate entries."""
+        mock_td.LANG_MAP = {"English": "eng"}
+        mock_td.get_db_path.return_value = self.temp_db_path
+        mock_td.search_word.return_value = [("555", "猫が好きです。", "I like cats.")]
+
+        field_order = ["Word", "ExampleJapanese", "ExampleTranslated", "ExampleAudio"]
+        note = self._make_mock_note(
+            {"Word": "猫", "ExampleJapanese": "", "ExampleTranslated": "", "ExampleAudio": ""},
+            field_order
+        )
+        col = self._make_mock_col([1], {1: note})
+
+        result = batch_engine.run_batch(
+            col=col, deck_id=1, lang_label="English",
+            source_field="Word",
+            dest_field_pairs=[("ExampleJapanese", "ExampleTranslated", "ExampleAudio")],
+            skip_existing=True
+        )
+
+        self.assertEqual(result.updated, 1)
+        self.assertEqual(len(result.pending_audio), 1)
+        jpn_id, note_id, audio_field = result.pending_audio[0]
+        self.assertEqual(jpn_id, "555")
+        self.assertEqual(note_id, 1)
+        self.assertEqual(audio_field, "ExampleAudio")
+
+    @patch('src.core.batch_engine.tatoeba_data')
+    def test_run_batch_no_audio_field_leaves_pending_audio_empty(self, mock_td):
+        """audio_field=None means no pending_audio entries."""
+        mock_td.LANG_MAP = {"English": "eng"}
+        mock_td.get_db_path.return_value = self.temp_db_path
+        mock_td.search_word.return_value = [("556", "猫が好きです。", "I like cats.")]
+
+        field_order = ["Word", "ExampleJapanese", "ExampleTranslated"]
+        note = self._make_mock_note(
+            {"Word": "猫", "ExampleJapanese": "", "ExampleTranslated": ""},
+            field_order
+        )
+        col = self._make_mock_col([1], {1: note})
+
+        result = batch_engine.run_batch(
+            col=col, deck_id=1, lang_label="English",
+            source_field="Word",
+            dest_field_pairs=[("ExampleJapanese", "ExampleTranslated", None)],
+            skip_existing=True
+        )
+
+        self.assertEqual(result.updated, 1)
+        self.assertEqual(result.pending_audio, [])
+
+
+class TestBatchResultAudioFields(unittest.TestCase):
+    def test_audio_counter_defaults(self):
+        result = BatchResult()
+        self.assertEqual(result.audio_added, 0)
+        self.assertEqual(result.audio_skipped, 0)
+        self.assertEqual(result.audio_errors, 0)
+
+    def test_pending_audio_defaults_empty(self):
+        result = BatchResult()
+        self.assertEqual(result.pending_audio, [])
+
+    def test_pending_audio_not_shared(self):
+        r1 = BatchResult()
+        r2 = BatchResult()
+        r1.pending_audio.append(("123", 1, "Audio"))
+        self.assertEqual(len(r2.pending_audio), 0)
+
+    def test_total_processed_excludes_audio_counters(self):
+        result = BatchResult(
+            updated=2, skipped_existing=1, skipped_no_match=1,
+            skipped_missing_fields=0, errors=0,
+            audio_added=5, audio_skipped=3, audio_errors=1
+        )
+        self.assertEqual(result.total_processed, 4)
+
+
+class TestProcessPendingAudio(unittest.TestCase):
+
+    def _make_mock_note(self, fields_dict, field_order=None):
+        if field_order is None:
+            field_order = list(fields_dict.keys())
+        note = MagicMock()
+        note.fields = [fields_dict.get(name, "") for name in field_order]
+        note.note_type.return_value = {"flds": [{"name": name} for name in field_order]}
+        return note
+
+    @patch('src.core.batch_engine.audio_fetcher')
+    def test_successful_download_writes_sound_tag(self, mock_af):
+        """Successful download writes [sound:fname] verbatim and increments audio_added."""
+        mock_af.download_audio.return_value = "12345.mp3"
+        mock_af.AudioDownloadError = AudioDownloadError
+
+        note = self._make_mock_note(
+            {"Word": "猫", "Audio": ""},
+            field_order=["Word", "Audio"]
+        )
+        col = MagicMock()
+        col.get_note.return_value = note
+
+        result = BatchResult()
+        result.pending_audio.append(("12345", 1, "Audio"))
+
+        process_pending_audio(result, col)
+
+        self.assertEqual(result.audio_added, 1)
+        self.assertEqual(result.audio_skipped, 0)
+        self.assertEqual(result.audio_errors, 0)
+        self.assertEqual(note.fields[1], "[sound:12345.mp3]")
+        col.update_note.assert_called_once_with(note)
+        self.assertEqual(result.pending_audio, [])
+
+    @patch('src.core.batch_engine.audio_fetcher')
+    def test_sound_tag_not_html_escaped(self, mock_af):
+        """[sound:] tag must be written verbatim — not passed through html.escape."""
+        import html
+        mock_af.download_audio.return_value = "12345.mp3"
+        mock_af.AudioDownloadError = AudioDownloadError
+
+        note = self._make_mock_note({"Audio": ""}, field_order=["Audio"])
+        col = MagicMock()
+        col.get_note.return_value = note
+
+        result = BatchResult()
+        result.pending_audio.append(("12345", 1, "Audio"))
+        process_pending_audio(result, col)
+
+        self.assertEqual(note.fields[0], "[sound:12345.mp3]")
+        # Verify the tag was not altered by html.escape ([ ] are not HTML-special, but confirm)
+        self.assertEqual(html.escape(note.fields[0]), note.fields[0])
+
+    @patch('src.core.batch_engine.audio_fetcher')
+    def test_404_increments_audio_skipped(self, mock_af):
+        """download_audio returning None (404) increments audio_skipped; no update_note call."""
+        mock_af.download_audio.return_value = None
+        mock_af.AudioDownloadError = AudioDownloadError
+
+        note = self._make_mock_note({"Audio": ""}, field_order=["Audio"])
+        col = MagicMock()
+        col.get_note.return_value = note
+
+        result = BatchResult()
+        result.pending_audio.append(("99999", 1, "Audio"))
+        process_pending_audio(result, col)
+
+        self.assertEqual(result.audio_skipped, 1)
+        self.assertEqual(result.audio_added, 0)
+        self.assertEqual(note.fields[0], "")
+        col.update_note.assert_not_called()
+        self.assertEqual(result.pending_audio, [])
+
+    @patch('src.core.batch_engine.audio_fetcher')
+    def test_audio_download_error_increments_audio_errors(self, mock_af):
+        """AudioDownloadError increments audio_errors; audio field left empty."""
+        mock_af.download_audio.side_effect = AudioDownloadError("Connection refused")
+        mock_af.AudioDownloadError = AudioDownloadError
+
+        note = self._make_mock_note({"Audio": ""}, field_order=["Audio"])
+        col = MagicMock()
+        col.get_note.return_value = note
+
+        result = BatchResult()
+        result.pending_audio.append(("11111", 1, "Audio"))
+        process_pending_audio(result, col)
+
+        self.assertEqual(result.audio_errors, 1)
+        self.assertEqual(result.audio_added, 0)
+        self.assertEqual(note.fields[0], "")
+        col.update_note.assert_not_called()
+        self.assertEqual(result.pending_audio, [])
+
+    @patch('src.core.batch_engine.audio_fetcher')
+    def test_missing_audio_field_increments_audio_errors(self, mock_af):
+        """Audio field not on note type increments audio_errors without calling download_audio."""
+        mock_af.AudioDownloadError = AudioDownloadError
+
+        note = self._make_mock_note({"Word": "猫"}, field_order=["Word"])
+        col = MagicMock()
+        col.get_note.return_value = note
+
+        result = BatchResult()
+        result.pending_audio.append(("12345", 1, "NonexistentAudioField"))
+        process_pending_audio(result, col)
+
+        self.assertEqual(result.audio_errors, 1)
+        mock_af.download_audio.assert_not_called()
+        self.assertEqual(result.pending_audio, [])
+
 
 if __name__ == '__main__':
     unittest.main()

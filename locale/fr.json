@@ -16,6 +16,7 @@
     "settings_dialog_title": "Paramètres de l'addon",
     "japanese_field_label": "Nom du champ Japonais :",
     "translation_field_label": "Nom du champ Traduction :",
+    "audio_field_label": "Nom du champ Audio :",
     "deck_preferences_reset": "Les préférences de paquet ont été réinitialisées.",
     "deck_preference_info_tooltip": "Cette préférence peut être réinitialisée dans les paramètres de l'addon.",
     "batch_menu_action": "Traiter les exemples en lot",
@@ -36,7 +37,7 @@
     "batch_jpn_field_label": "Champ exemple japonais :",
     "batch_trans_field_label": "Champ exemple traduit :",
     "batch_report_title": "Rapport de traitement en lot",
-    "batch_report_body": "Traitement en lot terminé.\n\nMis à jour : {updated}\nIgnorés (exemples existants) : {skipped_existing}\nIgnorés (aucune correspondance) : {skipped_no_match}\nIgnorés (champs manquants) : {skipped_missing}\nErreurs : {errors}",
+    "batch_report_body": "Traitement en lot terminé.\n\nMis à jour : {updated}\nIgnorés (exemples existants) : {skipped_existing}\nIgnorés (aucune correspondance) : {skipped_no_match}\nIgnorés (champs manquants) : {skipped_missing}\nErreurs : {errors}\nAudio ajouté : {audio_added}\nIgnorés (aucun enregistrement) : {audio_skipped}",
     "batch_no_data": "Aucune donnée Tatoeba disponible. Veuillez d'abord télécharger les données.",
     "batch_no_fields": "Aucun champ disponible. Veuillez sélectionner un deck contenant des notes.",
     "batch_progress_title": "Téléchargement des données",
@@ -51,9 +52,13 @@
     "batch_trans_field_label_1": "Champ exemple traduit 1 :",
     "batch_trans_field_label_2": "Champ exemple traduit 2 :",
     "batch_trans_field_label_3": "Champ exemple traduit 3 :",
+    "batch_audio_field_label_1": "Champ audio 1 :",
+    "batch_audio_field_label_2": "Champ audio 2 :",
+    "batch_audio_field_label_3": "Champ audio 3 :",
     "batch_running": "Exécution du traitement en lot...",
     "batch_language_english": "Anglais",
     "batch_language_french": "Français",
     "batch_field_none": "-- Aucun --",
-    "batch_error_incomplete_pair": "Veuillez sélectionner un champ Japonais et un champ Traduit pour chaque paire, ou définir les deux sur '-- Aucun --'."
+    "batch_error_incomplete_pair": "Veuillez sélectionner un champ Japonais et un champ Traduit pour chaque paire, ou définir les deux sur '-- Aucun --'.",
+    "no_valid_dst_fields": "Le(s) champ(s) {missing} sont introuvables dans ce type de note.\nChamps disponibles : {available}\n\nVeuillez mettre à jour les noms de champs dans la configuration du module."
 }
