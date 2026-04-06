@@ -144,8 +144,9 @@ def run_batch(
     - dest_field_pairs (list[tuple[str, str, str | None]]): List of triples of (Japanese,
       Translation, Audio) destination field names. The audio element is the destination field name
       for the [sound:] tag, or None if no audio is configured for this pair.
-    - skip_existing (bool): If True, skip notes that already have content in the
-      FIRST destination field pair. Default is True.
+    - skip_existing (bool): If True, skip field pairs that already have content in
+      both Japanese and Translation fields. Cards where all pairs are skipped count
+      as skipped_existing. Default is True.
 
     Returns:
     - A BatchResult dataclass with counters for updated, skipped, and errored notes.
@@ -202,38 +203,55 @@ def run_batch(
                     result.skipped_missing_fields += 1
                     continue
 
-                # Check skip_existing based on the FIRST field pair
-                first_jpn_dest, first_trans_dest, _ = dest_field_pairs[0]
-                first_jpn_idx = field_names.index(first_jpn_dest)
-                first_trans_idx = field_names.index(first_trans_dest)
-
-                if skip_existing:
-                    if note.fields[first_jpn_idx].strip() and note.fields[first_trans_idx].strip():
-                        result.skipped_existing += 1
-                        continue
-
                 # Search for matches
                 matches = tatoeba_data.search_word(db_path, word, conn=conn)
                 if not matches:
                     result.skipped_no_match += 1
                     continue
 
-                # Select unique random matches up to the number of pairs requested or available
-                num_to_select = min(len(dest_field_pairs), len(matches))
-                selected_matches = random.sample(matches, num_to_select)
+                # Audio-first selection: prefer sentences with Tatoeba recordings.
+                # Pairs with an audio field configured are sorted first so that
+                # audio sentences are assigned to those slots — ensuring the text
+                # written to a pair and the audio queued for that same pair come
+                # from the same sentence.
+                n = min(len(dest_field_pairs), len(matches))
+                audio = [m for m in matches if m[3]]
+                non_audio = [m for m in matches if not m[3]]
+                selected_matches = random.sample(audio, min(n, len(audio)))
+                if len(selected_matches) < n:
+                    selected_matches += random.sample(
+                        non_audio, min(n - len(selected_matches), len(non_audio))
+                    )
 
-                # Write HTML-escaped results
-                for i, (jpn_id, jpn_text, trans_text) in enumerate(selected_matches):
-                    jpn_field, trans_field, audio_field = dest_field_pairs[i]
+                # Sort dest_field_pairs so audio-configured pairs come first,
+                # keeping original relative order within each group.
+                ordered_pairs = sorted(
+                    enumerate(dest_field_pairs[:n]),
+                    key=lambda t: 0 if t[1][2] is not None else 1,
+                )
+
+                # Write HTML-escaped results, skipping pairs that already have content
+                any_pair_written = False
+                for match, (_orig_i, (jpn_field, trans_field, audio_field)) in zip(
+                        selected_matches, ordered_pairs):
+                    jpn_id, jpn_text, trans_text, _has_audio = match
                     jpn_idx = field_names.index(jpn_field)
                     trans_idx = field_names.index(trans_field)
+
+                    if skip_existing and note.fields[jpn_idx].strip() and note.fields[trans_idx].strip():
+                        continue
+
                     note.fields[jpn_idx] = html.escape(jpn_text)
                     note.fields[trans_idx] = html.escape(trans_text)
                     if audio_field is not None:
                         result.pending_audio.append((jpn_id, nid, audio_field))
+                    any_pair_written = True
 
-                col.update_note(note)
-                result.updated += 1
+                if any_pair_written:
+                    col.update_note(note)
+                    result.updated += 1
+                else:
+                    result.skipped_existing += 1
 
             except Exception as e:
                 logger.error(f"Error processing note {nid}: {e}", exc_info=True)

@@ -46,6 +46,7 @@
     "batch_step_fetch_links": "Fetching sentence links…",
     "batch_step_build_tsv": "Building sentence pairs…",
     "batch_step_build_index": "Building search index…",
+    "batch_step_fetch_audio_index": "Fetching audio index…",
     "batch_jpn_field_label_1": "Japanese example field 1:",
     "batch_jpn_field_label_2": "Japanese example field 2:",
     "batch_jpn_field_label_3": "Japanese example field 3:",
