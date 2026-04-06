@@ -1,5 +1,7 @@
 import os
 import bz2
+import io
+import tarfile
 import logging
 import requests
 import datetime
@@ -22,6 +24,7 @@ except ImportError:
         _ = lambda x: x
 
 TATOEBA_BASE_URL = "https://downloads.tatoeba.org/exports/per_language"
+AUDIO_INDEX_URL = "https://downloads.tatoeba.org/exports/sentences_with_audio.tar.bz2"
 LANG_MAP = {"English": "eng", "French": "fra"}
 USER_FILES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "user_files")
 METADATA_FILE = os.path.join(USER_FILES_DIR, "metadata.json")
@@ -69,7 +72,7 @@ def tokenize_japanese(text: str) -> list[str]:
     """
     return list(dict.fromkeys(_TOKEN_RE.findall(text)))
 
-def build_sqlite_index(pairs_tsv_path: str, db_path: str) -> int:
+def build_sqlite_index(pairs_tsv_path: str, db_path: str, audio_ids: set[str] | None = None) -> int:
     """
     Build a SQLite index database from a pairs TSV file.
 
@@ -97,7 +100,8 @@ def build_sqlite_index(pairs_tsv_path: str, db_path: str) -> int:
             jpn_id TEXT,
             jpn_text TEXT,
             trans_id TEXT,
-            trans_text TEXT
+            trans_text TEXT,
+            has_audio INTEGER DEFAULT 0
         )
     """)
     cur.execute("""
@@ -116,9 +120,10 @@ def build_sqlite_index(pairs_tsv_path: str, db_path: str) -> int:
                 if len(parts) < 4:
                     continue
                 jpn_id, jpn_text, trans_id, trans_text = parts[0], parts[1], parts[2], parts[3]
+                has_audio_val = 1 if audio_ids and jpn_id in audio_ids else 0
                 cur.execute(
-                    "INSERT INTO sentences (jpn_id, jpn_text, trans_id, trans_text) VALUES (?, ?, ?, ?)",
-                    (jpn_id, jpn_text, trans_id, trans_text)
+                    "INSERT INTO sentences (jpn_id, jpn_text, trans_id, trans_text, has_audio) VALUES (?, ?, ?, ?, ?)",
+                    (jpn_id, jpn_text, trans_id, trans_text, has_audio_val)
                 )
                 sentence_id = cur.lastrowid
                 tokens = tokenize_japanese(jpn_text)
@@ -138,7 +143,7 @@ def build_sqlite_index(pairs_tsv_path: str, db_path: str) -> int:
     conn.close()
     return count
 
-def search_word(db_path: str, word: str, conn: Optional[sqlite3.Connection] = None) -> list[tuple[str, str, str]]:
+def search_word(db_path: str, word: str, conn: Optional[sqlite3.Connection] = None) -> list[tuple[str, str, str, int]]:
     """
     Search the SQLite index for sentences containing the word.
 
@@ -153,7 +158,7 @@ def search_word(db_path: str, word: str, conn: Optional[sqlite3.Connection] = No
     - conn (Optional[sqlite3.Connection]): An optional active database connection to reuse.
 
     Returns:
-    - A list of (jpn_id, jpn_text, trans_text) tuples for all matching sentences,
+    - A list of (jpn_id, jpn_text, trans_text, has_audio) tuples for all matching sentences,
       where jpn_id is the Tatoeba sentence ID from the sentences table.
       Returns an empty list if the database does not exist or an error occurs.
     """
@@ -181,7 +186,7 @@ def search_word(db_path: str, word: str, conn: Optional[sqlite3.Connection] = No
         cur = local_conn.cursor()
         safe_word = word.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
         cur.execute(f"""
-            SELECT DISTINCT s.jpn_id, s.jpn_text, s.trans_text
+            SELECT DISTINCT s.jpn_id, s.jpn_text, s.trans_text, s.has_audio
             FROM words w
             JOIN sentences s ON w.sentence_id = s.id
             WHERE {token_query}
@@ -224,6 +229,37 @@ def download_and_extract_bz2(url: str) -> str:
     response = requests.get(url, stream=True, timeout=60)
     response.raise_for_status()
     return bz2.decompress(response.content).decode("utf-8")
+
+def download_audio_ids(url: str) -> set[str]:
+    """
+    Downloads sentences_with_audio.tar.bz2 and returns the set of sentence IDs
+    that have audio recordings.
+
+    The archive contains a single CSV file where the first tab-separated column
+    is the numeric Tatoeba sentence ID.
+
+    Args:
+    - url (str): The URL of the tar.bz2 audio index archive.
+
+    Returns:
+    - A set of sentence ID strings (e.g. {"42", "1337", ...}).
+    """
+    response = requests.get(url, stream=True, timeout=120)
+    response.raise_for_status()
+    audio_ids: set[str] = set()
+    with tarfile.open(fileobj=io.BytesIO(response.content), mode="r:bz2") as tar:
+        for member in tar.getmembers():
+            f = tar.extractfile(member)
+            if f is None:
+                continue
+            for raw_line in f:
+                line = raw_line.decode("utf-8").strip()
+                if not line:
+                    continue
+                parts = line.split("\t")
+                if parts and parts[0].isdigit():
+                    audio_ids.add(parts[0])
+    return audio_ids
 
 def build_pairs_tsv(jpn_sentences_tsv: str, target_sentences_tsv: str, links_tsv: str) -> str:
     """
@@ -299,7 +335,11 @@ def download_tatoeba_data(lang_label: str, progress_callback=None) -> tuple[bool
         if progress_callback:
             progress_callback(_("batch_step_fetch_links"))
         links_content = download_and_extract_bz2(urls["links"])
-        
+
+        if progress_callback:
+            progress_callback(_("batch_step_fetch_audio_index"))
+        audio_ids: set[str] = download_audio_ids(AUDIO_INDEX_URL)
+
         if progress_callback:
             progress_callback(_("batch_step_build_tsv"))
         pairs_tsv = build_pairs_tsv(jpn_content, target_content, links_content)
@@ -312,7 +352,7 @@ def download_tatoeba_data(lang_label: str, progress_callback=None) -> tuple[bool
             progress_callback(_("batch_step_build_index"))
         # Build SQLite index for strict word-boundary matching
         db_path = get_db_path(lang_code)
-        build_sqlite_index(output_file, db_path)
+        build_sqlite_index(output_file, db_path, audio_ids=audio_ids)
             
         metadata = {}
         if os.path.exists(METADATA_FILE):

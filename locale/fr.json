@@ -46,6 +46,7 @@
     "batch_step_fetch_links": "Récupération des liens…",
     "batch_step_build_tsv": "Construction des paires de phrases…",
     "batch_step_build_index": "Construction de l'index de recherche…",
+    "batch_step_fetch_audio_index": "Récupération de l'index audio…",
     "batch_jpn_field_label_1": "Champ exemple japonais 1 :",
     "batch_jpn_field_label_2": "Champ exemple japonais 2 :",
     "batch_jpn_field_label_3": "Champ exemple japonais 3 :",

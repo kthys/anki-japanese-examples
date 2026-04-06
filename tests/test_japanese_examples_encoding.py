@@ -347,6 +347,134 @@ class TestJapaneseExamples(unittest.TestCase):
         self.assertIsInstance(result, list)
         self.assertLessEqual(len(result), 3)
 
+    # ── audio-first sort ────────────────────────────────────────────
+
+    def test_audio_sentences_sorted_before_non_audio(self):
+        """Sentences with audio should appear before sentences without audio."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'results': [
+                {
+                    'id': 1,
+                    'text': '音声なし文',
+                    'transcriptions': [{'needsReview': False}],
+                    'translations': [[{'text': 'No audio sentence'}]],
+                    'audios': [],
+                },
+                {
+                    'id': 2,
+                    'text': '音声あり文',
+                    'transcriptions': [{'needsReview': False}],
+                    'translations': [[{'text': 'Audio sentence'}]],
+                    'audios': [{'id': 99, 'author': 'speaker'}],
+                },
+            ]
+        }
+        self.mock_session.get.return_value = mock_response
+
+        result = self.japanese_examples.find_japanese_sentence("test", "eng")
+
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+        # Audio sentence must come first regardless of API order
+        self.assertTrue(result[0]['has_audio'], "First result should have audio")
+        self.assertFalse(result[1]['has_audio'], "Second result should not have audio")
+
+    def test_all_audio_sentences_preserve_relative_order(self):
+        """When all sentences have audio, their relative order should be preserved."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'results': [
+                {
+                    'id': 10,
+                    'text': '最初の文',
+                    'transcriptions': [{'needsReview': False}],
+                    'translations': [[{'text': 'First sentence'}]],
+                    'audios': [{'id': 1, 'author': 'a'}],
+                },
+                {
+                    'id': 20,
+                    'text': '二番目の文',
+                    'transcriptions': [{'needsReview': False}],
+                    'translations': [[{'text': 'Second sentence'}]],
+                    'audios': [{'id': 2, 'author': 'b'}],
+                },
+            ]
+        }
+        self.mock_session.get.return_value = mock_response
+
+        result = self.japanese_examples.find_japanese_sentence("test", "eng")
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]['jpn_id'], '10')
+        self.assertEqual(result[1]['jpn_id'], '20')
+
+    def test_all_non_audio_sentences_preserve_relative_order(self):
+        """When no sentences have audio, their relative order should be preserved."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'results': [
+                {
+                    'id': 10,
+                    'text': '最初の文',
+                    'transcriptions': [{'needsReview': False}],
+                    'translations': [[{'text': 'First sentence'}]],
+                    'audios': [],
+                },
+                {
+                    'id': 20,
+                    'text': '二番目の文',
+                    'transcriptions': [{'needsReview': False}],
+                    'translations': [[{'text': 'Second sentence'}]],
+                    'audios': [],
+                },
+            ]
+        }
+        self.mock_session.get.return_value = mock_response
+
+        result = self.japanese_examples.find_japanese_sentence("test", "eng")
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]['jpn_id'], '10')
+        self.assertEqual(result[1]['jpn_id'], '20')
+
+    def test_audio_sort_applies_before_max_results_cap(self):
+        """Audio-first sort should happen before the max_results slice so that
+        audio sentences are not accidentally dropped by the cap."""
+        # API returns 3 non-audio then 1 audio; with max_results=3 the audio
+        # sentence must still appear (at index 0) after sort+cap.
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'results': [
+                {
+                    'id': i,
+                    'text': f'非音声{i}',
+                    'transcriptions': [{'needsReview': False}],
+                    'translations': [[{'text': f'No audio {i}'}]],
+                    'audios': [],
+                }
+                for i in range(1, 4)
+            ] + [
+                {
+                    'id': 4,
+                    'text': '音声あり',
+                    'transcriptions': [{'needsReview': False}],
+                    'translations': [[{'text': 'Has audio'}]],
+                    'audios': [{'id': 99, 'author': 'x'}],
+                }
+            ]
+        }
+        self.mock_session.get.return_value = mock_response
+
+        result = self.japanese_examples.find_japanese_sentence("test", "eng", max_results=3)
+
+        self.assertEqual(len(result), 3)
+        self.assertTrue(result[0]['has_audio'], "Audio sentence should be first after sort+cap")
+
 
 if __name__ == '__main__':
     unittest.main()

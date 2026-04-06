@@ -1,0 +1,2 @@
+# Development dependencies (not shipped with the add-on)
+responses>=0.25,<1

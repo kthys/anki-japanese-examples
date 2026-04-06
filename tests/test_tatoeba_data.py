@@ -78,8 +78,9 @@ class TestTatoebaData(unittest.TestCase):
     def test_build_pairs_tsv_empty_input(self):
         self.assertEqual(tatoeba_data.build_pairs_tsv("", "", ""), "")
 
+    @patch('src.core.tatoeba_data.download_audio_ids', return_value=set())
     @patch('src.core.tatoeba_data.requests.get')
-    def test_download_tatoeba_data_success(self, mock_get):
+    def test_download_tatoeba_data_success(self, mock_get, mock_audio_ids):
         mock_response = MagicMock()
         mock_response.content = bz2.compress(b"mock tsv content")
         mock_response.raise_for_status.return_value = None
@@ -256,7 +257,7 @@ class TestTatoebaData(unittest.TestCase):
         os.remove(db_path)
 
     def test_search_word_returns_jpn_id(self):
-        """search_word must return (jpn_id, jpn_text, trans_text) triples where jpn_id matches the sentences table."""
+        """search_word must return (jpn_id, jpn_text, trans_text, has_audio) 4-tuples where jpn_id matches the sentences table."""
         tsv_path = os.path.join(self.temp_dir, "jpnid_pairs.tsv")
         db_path = os.path.join(self.temp_dir, "jpnid_index.db")
 
@@ -267,10 +268,11 @@ class TestTatoebaData(unittest.TestCase):
         results = tatoeba_data.search_word(db_path, "猫")
 
         self.assertEqual(len(results), 1)
-        self.assertEqual(len(results[0]), 3)           # triple, not pair
+        self.assertEqual(len(results[0]), 4)           # 4-tuple, not triple
         self.assertEqual(results[0][0], "42")          # jpn_id matches sentences table
         self.assertEqual(results[0][1], "猫が好きです。")
         self.assertEqual(results[0][2], "I like cats.")
+        self.assertEqual(results[0][3], 0)             # has_audio defaults to 0
 
         os.remove(db_path)
 
@@ -279,7 +281,8 @@ class TestTatoebaData(unittest.TestCase):
         results = tatoeba_data.search_word("/nonexistent/path.db", "猫")
         self.assertEqual(results, [])
 
-    def test_download_tatoeba_data_calls_progress_callback(self):
+    @patch('src.core.tatoeba_data.download_audio_ids', return_value=set())
+    def test_download_tatoeba_data_calls_progress_callback(self, mock_audio_ids):
         """progress_callback should be called at least 5 times during download."""
         mock_response = MagicMock()
         mock_response.content = bz2.compress(b"mock tsv content")
@@ -291,7 +294,89 @@ class TestTatoebaData(unittest.TestCase):
             with patch('src.core.tatoeba_data.build_pairs_tsv', return_value="1\t猫\t100\tcat\n"):
                 tatoeba_data.download_tatoeba_data("English", progress_callback=callback)
 
-        self.assertGreaterEqual(callback.call_count, 5)
+        self.assertGreaterEqual(callback.call_count, 6)
+
+    def test_build_sqlite_index_with_audio_ids(self):
+        """build_sqlite_index with audio_ids={"42"} sets has_audio=1 on matching row and 0 on non-matching."""
+        tsv_path = os.path.join(self.temp_dir, "audio_pairs.tsv")
+        db_path = os.path.join(self.temp_dir, "audio_index.db")
+
+        with open(tsv_path, "w", encoding="utf-8") as f:
+            f.write("42\t猫が好きです。\t100\tI like cats.\n")
+            f.write("99\t犬が好きです。\t101\tI like dogs.\n")
+
+        tatoeba_data.build_sqlite_index(tsv_path, db_path, audio_ids={"42"})
+
+        import sqlite3 as _sqlite3
+        conn = _sqlite3.connect(db_path)
+        rows = dict(conn.execute("SELECT jpn_id, has_audio FROM sentences").fetchall())
+        conn.close()
+        os.remove(db_path)
+
+        self.assertEqual(rows["42"], 1)
+        self.assertEqual(rows["99"], 0)
+
+    def test_build_sqlite_index_without_audio_ids_backward_compat(self):
+        """build_sqlite_index with no audio_ids leaves has_audio=0 on all rows."""
+        tsv_path = os.path.join(self.temp_dir, "noaudio_pairs.tsv")
+        db_path = os.path.join(self.temp_dir, "noaudio_index.db")
+
+        with open(tsv_path, "w", encoding="utf-8") as f:
+            f.write("10\t花が咲く。\t200\tThe flowers bloom.\n")
+
+        tatoeba_data.build_sqlite_index(tsv_path, db_path)
+
+        import sqlite3 as _sqlite3
+        conn = _sqlite3.connect(db_path)
+        rows = conn.execute("SELECT has_audio FROM sentences").fetchall()
+        conn.close()
+        os.remove(db_path)
+
+        self.assertEqual(rows[0][0], 0)
+
+    def test_search_word_returns_4_tuple_with_has_audio(self):
+        """search_word returns 4-tuples where results[0][3] == 1 for audio-marked rows."""
+        tsv_path = os.path.join(self.temp_dir, "s4t_pairs.tsv")
+        db_path = os.path.join(self.temp_dir, "s4t_index.db")
+
+        with open(tsv_path, "w", encoding="utf-8") as f:
+            f.write("42\t猫が好きです。\t100\tI like cats.\n")
+
+        tatoeba_data.build_sqlite_index(tsv_path, db_path, audio_ids={"42"})
+        results = tatoeba_data.search_word(db_path, "猫")
+        os.remove(db_path)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(len(results[0]), 4)
+        self.assertEqual(results[0][3], 1)
+
+    def test_search_word_returns_has_audio_zero_for_non_audio(self):
+        """search_word returns has_audio=0 for rows not in audio_ids."""
+        tsv_path = os.path.join(self.temp_dir, "s4n_pairs.tsv")
+        db_path = os.path.join(self.temp_dir, "s4n_index.db")
+
+        with open(tsv_path, "w", encoding="utf-8") as f:
+            f.write("99\t犬が好きです。\t101\tI like dogs.\n")
+
+        tatoeba_data.build_sqlite_index(tsv_path, db_path, audio_ids=set())
+        results = tatoeba_data.search_word(db_path, "犬")
+        os.remove(db_path)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0][3], 0)
+
+    @patch('src.core.tatoeba_data.download_audio_ids', return_value={"1"})
+    @patch('src.core.tatoeba_data.download_and_extract_bz2')
+    @patch('src.core.tatoeba_data.build_pairs_tsv', return_value="1\t猫\t100\tcat\n")
+    def test_download_tatoeba_data_fetches_audio_index(self, mock_build_pairs, mock_dl_bz2, mock_audio_ids):
+        """download_tatoeba_data calls download_and_extract_bz2 3 times (corpus) and download_audio_ids once."""
+        mock_dl_bz2.return_value = "mock tsv content"
+
+        tatoeba_data.download_tatoeba_data("English")
+
+        self.assertEqual(mock_dl_bz2.call_count, 3)
+        mock_audio_ids.assert_called_once_with(tatoeba_data.AUDIO_INDEX_URL)
+
 
 if __name__ == '__main__':
     unittest.main()

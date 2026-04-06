@@ -101,6 +101,8 @@ def find_japanese_sentence(word, translation_language='eng', max_results=50):
 
         # Check if any sentences were found.
         if sentences:
+            # Sort audio sentences to the top (stable sort preserves relative order within each group).
+            sentences.sort(key=lambda s: 0 if s['has_audio'] else 1)
             return sentences[:max_results]
 
     return _("no_japanese_sentence_found").format(word=word)
