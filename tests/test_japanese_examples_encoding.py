@@ -65,21 +65,23 @@ class TestJapaneseExamples(unittest.TestCase):
         self.japanese_examples.find_japanese_sentence(word, lang)
 
         self.assertTrue(self.mock_session.get.called, "session.get was not called")
-        args, kwargs = self.mock_session.get.call_args
+        call_list = self.mock_session.get.call_args_list
 
-        self.assertEqual(args[0], "https://tatoeba.org/en/api_v0/search")
-        self.assertIn('params', kwargs)
+        first_call_params = call_list[0][1]['params']
+        self.assertEqual(call_list[0][0][0], "https://tatoeba.org/en/api_v0/search")
+        self.assertEqual(first_call_params['query'], f'={word}')
+        self.assertEqual(first_call_params['from'], 'jpn')
+        self.assertEqual(first_call_params['to'], lang)
+        self.assertEqual(first_call_params['has_audio'], 'yes')
+        self.assertEqual(first_call_params['limit'], 50)
 
-        expected_params = {
-            'query': f'={word}',
-            'from': 'jpn',
-            'to': lang,
-            'limit': 50
-        }
-        self.assertEqual(kwargs['params'], expected_params)
+        if len(call_list) > 1:
+            second_call_params = call_list[1][1]['params']
+            self.assertNotIn('has_audio', second_call_params)
+            self.assertEqual(second_call_params['limit'], 50)
 
     def test_find_japanese_sentence_custom_max_results(self):
-        """Should pass the max_results value as the limit param."""
+        """Should pass the max_results value as the limit param in both calls."""
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {}
@@ -87,16 +89,18 @@ class TestJapaneseExamples(unittest.TestCase):
 
         self.japanese_examples.find_japanese_sentence("word", "eng", max_results=10)
 
-        _, kwargs = self.mock_session.get.call_args
-        self.assertEqual(kwargs['params']['limit'], 10)
+        call_list = self.mock_session.get.call_args_list
+        self.assertEqual(call_list[0][1]['params']['limit'], 10)
+        if len(call_list) > 1:
+            self.assertEqual(call_list[1][1]['params']['limit'], 10)
 
     # ── Response parsing ────────────────────────────────────────────
 
     def test_parse_valid_results(self):
         """Should extract jp_sentence and tr_sentence from valid API results."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
+        audio_response = MagicMock()
+        audio_response.status_code = 200
+        audio_response.json.return_value = {
             'results': [
                 {
                     'text': '日本語の文',
@@ -105,7 +109,10 @@ class TestJapaneseExamples(unittest.TestCase):
                 }
             ]
         }
-        self.mock_session.get.return_value = mock_response
+        fill_response = MagicMock()
+        fill_response.status_code = 200
+        fill_response.json.return_value = {'results': []}
+        self.mock_session.get.side_effect = [audio_response, fill_response]
 
         result = self.japanese_examples.find_japanese_sentence("test", "eng")
 
@@ -116,9 +123,9 @@ class TestJapaneseExamples(unittest.TestCase):
 
     def test_parse_multiple_results(self):
         """Should return all valid sentence pairs."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
+        audio_response = MagicMock()
+        audio_response.status_code = 200
+        audio_response.json.return_value = {
             'results': [
                 {
                     'text': '文1',
@@ -132,7 +139,10 @@ class TestJapaneseExamples(unittest.TestCase):
                 }
             ]
         }
-        self.mock_session.get.return_value = mock_response
+        fill_response = MagicMock()
+        fill_response.status_code = 200
+        fill_response.json.return_value = {'results': []}
+        self.mock_session.get.side_effect = [audio_response, fill_response]
 
         result = self.japanese_examples.find_japanese_sentence("test", "eng")
 
@@ -144,9 +154,9 @@ class TestJapaneseExamples(unittest.TestCase):
 
     def test_filters_sentences_needing_review(self):
         """Should skip sentences where transcriptions[0].needsReview is True."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
+        audio_response = MagicMock()
+        audio_response.status_code = 200
+        audio_response.json.return_value = {
             'results': [
                 {
                     'text': '良い文',
@@ -160,7 +170,10 @@ class TestJapaneseExamples(unittest.TestCase):
                 }
             ]
         }
-        self.mock_session.get.return_value = mock_response
+        fill_response = MagicMock()
+        fill_response.status_code = 200
+        fill_response.json.return_value = {'results': []}
+        self.mock_session.get.side_effect = [audio_response, fill_response]
 
         result = self.japanese_examples.find_japanese_sentence("test", "eng")
 
@@ -172,9 +185,9 @@ class TestJapaneseExamples(unittest.TestCase):
 
     def test_skips_result_without_translation(self):
         """Should skip results that have no translation."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
+        audio_response = MagicMock()
+        audio_response.status_code = 200
+        audio_response.json.return_value = {
             'results': [
                 {
                     'text': '翻訳なし',
@@ -188,7 +201,10 @@ class TestJapaneseExamples(unittest.TestCase):
                 }
             ]
         }
-        self.mock_session.get.return_value = mock_response
+        fill_response = MagicMock()
+        fill_response.status_code = 200
+        fill_response.json.return_value = {'results': []}
+        self.mock_session.get.side_effect = [audio_response, fill_response]
 
         result = self.japanese_examples.find_japanese_sentence("test", "eng")
 
@@ -474,6 +490,69 @@ class TestJapaneseExamples(unittest.TestCase):
 
         self.assertEqual(len(result), 3)
         self.assertTrue(result[0]['has_audio'], "Audio sentence should be first after sort+cap")
+
+    def test_audio_query_parameter_sent_in_first_call(self):
+        """First API call should include has_audio=yes to prioritize audio sentences."""
+        audio_response = MagicMock()
+        audio_response.status_code = 200
+        audio_response.json.return_value = {
+            'results': [
+                {
+                    'id': 1,
+                    'text': '音声あり',
+                    'transcriptions': [{'needsReview': False}],
+                    'translations': [[{'text': 'Has audio'}]],
+                    'audios': [{'id': 1, 'author': 'a'}],
+                }
+            ]
+        }
+        fill_response = MagicMock()
+        fill_response.status_code = 200
+        fill_response.json.return_value = {
+            'results': [
+                {
+                    'id': 2,
+                    'text': '音声なし',
+                    'transcriptions': [{'needsReview': False}],
+                    'translations': [[{'text': 'No audio'}]],
+                    'audios': [],
+                }
+            ]
+        }
+        self.mock_session.get.side_effect = [audio_response, fill_response]
+
+        result = self.japanese_examples.find_japanese_sentence("test", "eng")
+
+        self.assertEqual(len(result), 2)
+        self.assertTrue(result[0]['has_audio'], "First result should have audio")
+        self.assertFalse(result[1]['has_audio'], "Second result should not have audio")
+
+        call_list = self.mock_session.get.call_args_list
+        self.assertEqual(call_list[0][1]['params']['has_audio'], 'yes')
+        self.assertNotIn('has_audio', call_list[1][1]['params'])
+
+    def test_no_second_call_when_audio_fills_max_results(self):
+        """When the audio-only call returns enough results, no second call should be made."""
+        audio_response = MagicMock()
+        audio_response.status_code = 200
+        audio_response.json.return_value = {
+            'results': [
+                {
+                    'id': i,
+                    'text': f'音声{i}',
+                    'transcriptions': [{'needsReview': False}],
+                    'translations': [[{'text': f'Audio {i}'}]],
+                    'audios': [{'id': i, 'author': 'a'}],
+                }
+                for i in range(1, 4)
+            ]
+        }
+        self.mock_session.get.return_value = audio_response
+
+        result = self.japanese_examples.find_japanese_sentence("test", "eng", max_results=3)
+
+        self.assertEqual(len(result), 3)
+        self.assertEqual(self.mock_session.get.call_count, 1, "Should only make one API call when audio results fill the limit")
 
 
 if __name__ == '__main__':
