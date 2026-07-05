@@ -65,5 +65,7 @@
     "batch_audio_progress": "Downloading audio {current}/{total}...",
     "batch_subdeck_label": "Subdeck:",
     "batch_subdeck_all": "Entire deck (including subdecks)",
-    "batch_confirm_root_deck": "You selected the deck '{deck}' without choosing a subdeck.\nAll {subdecks} subdeck(s) ({notes} notes) will be processed.\n\nContinue?"
+    "batch_confirm_root_deck": "You selected the deck '{deck}' without choosing a subdeck.\nAll {subdecks} subdeck(s) ({notes} notes) will be processed.\n\nContinue?",
+    "batch_undo_entry": "Add Japanese examples",
+    "batch_audio_undo_entry": "Add example audio"
 }

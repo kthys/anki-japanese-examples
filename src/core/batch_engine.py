@@ -88,6 +88,9 @@ class BatchResult:
     - pending_audio (list[tuple[str, int, str]]): Staging list of (jpn_id, note_id, audio_field)
       triples accumulated by run_batch(), downloaded in a background op by
       download_pending_audio(), and drained on the main thread by register_pending_audio().
+    - changes: The OpChanges returned by the final merge_undo_entries() call when
+      run_batch() was given an undo_name; None otherwise. A CollectionOp op must
+      return this so Anki refreshes open windows and updates the Undo menu.
     """
     updated: int = 0
     skipped_existing: int = 0
@@ -98,6 +101,7 @@ class BatchResult:
     audio_skipped: int = 0
     audio_errors: int = 0
     pending_audio: list = field(default_factory=list)
+    changes: object = None
 
     @property
     def total_processed(self) -> int:
@@ -182,34 +186,81 @@ def download_pending_audio(result: BatchResult, col, progress_cb=None) -> list:
     return items
 
 
-def register_pending_audio(items: list, result: BatchResult, col) -> None:
-    """Register phase: store fetched files in col.media and write [sound:] tags.
+def register_audio_media(items: list, result: BatchResult, col) -> list:
+    """Media half of audio registration: store fetched files in col.media.
 
     PRECONDITION: Must be called from the main thread
-    (col.media.add_file constraint). Fast — local file copy + DB writes only.
+    (col.media.add_file constraint). Fast — local file copies only.
+
+    Media files are outside Anki's undo system, which is why this phase is
+    deliberately separate from the note-field writes in apply_audio_fields()
+    (those run inside a CollectionOp so they land in a named undo entry).
 
     Consumes the outcome tuples produced by download_pending_audio():
-    - AUDIO_FETCHED: registers the temp file, writes [sound:fname] verbatim,
-      calls col.update_note, increments result.audio_added.
-    - AUDIO_EXISTS: writes the tag without re-registering, increments audio_added.
+    - AUDIO_FETCHED: registers the temp file via register_audio_file()
+      (which owns temp cleanup even on failure) and passes it through.
+    - AUDIO_EXISTS: passes the existing filename through unchanged.
     - AUDIO_NO_RECORDING: increments result.audio_skipped.
     - AUDIO_FETCH_ERROR: increments result.audio_errors.
-    - Any unexpected exception: logs the traceback, increments audio_errors,
-      cleans up the temp file, continues with the next item.
+    - Any unexpected exception: logs, increments audio_errors, continues.
 
-    Clears result.pending_audio after processing.
+    Returns:
+    - A list of (note_id, audio_field, jpn_id, fname) tuples for
+      apply_audio_fields().
     """
-    field_names_cache: dict[int, list[str]] = {}
+    registered: list = []
     for note_id, audio_field, jpn_id, status, payload in items:
-        tmp_path = payload if status == AUDIO_FETCHED else None
         try:
             if status == AUDIO_FETCH_ERROR:
                 result.audio_errors += 1
-                continue
-            if status == AUDIO_NO_RECORDING:
+            elif status == AUDIO_NO_RECORDING:
                 result.audio_skipped += 1
-                continue
+            elif status == AUDIO_EXISTS:
+                registered.append((note_id, audio_field, jpn_id, payload))
+            else:  # AUDIO_FETCHED
+                fname = audio_fetcher.register_audio_file(payload, col)
+                registered.append((note_id, audio_field, jpn_id, fname))
+        except Exception:
+            result.audio_errors += 1
+            logger.exception(
+                "Failed to register audio media for note %d (jpn_id %s)",
+                note_id, jpn_id,
+            )
+    return registered
 
+
+def apply_audio_fields(registered: list, result: BatchResult, col,
+                       undo_name: "str | None" = None):
+    """Field half of audio registration: write [sound:fname] tags to notes.
+
+    BACKGROUND-SAFE: collection writes only, no media access — designed to
+    run inside a CollectionOp op so the writes land in one named undo entry
+    and open windows refresh afterwards.
+
+    For each (note_id, audio_field, jpn_id, fname) from register_audio_media():
+    - Writes [sound:fname] verbatim, calls col.update_note, increments
+      result.audio_added.
+    - On missing audio field or any unexpected exception: logs, increments
+      result.audio_errors, continues with the next item.
+
+    Clears result.pending_audio after processing.
+
+    Returns:
+    - The OpChanges from the final merge_undo_entries() when undo_name is set
+      (return this from the CollectionOp op), otherwise None.
+    """
+    undo_pos = None
+    if undo_name is not None:
+        try:
+            undo_pos = col.add_custom_undo_entry(undo_name)
+        except Exception:
+            logger.warning("Custom undo entry unavailable — audio tags will not be undoable",
+                           exc_info=True)
+
+    field_names_cache: dict[int, list[str]] = {}
+    applied = 0
+    for note_id, audio_field, jpn_id, fname in registered:
+        try:
             note = col.get_note(note_id)
             ntid = note.mid
             if ntid not in field_names_cache:
@@ -220,31 +271,44 @@ def register_pending_audio(items: list, result: BatchResult, col) -> None:
                 logger.warning("Audio field %r not found on note %d", audio_field, note_id)
                 continue
 
-            if status == AUDIO_EXISTS:
-                fname = payload
-            else:
-                # register_audio_file always cleans up the temp file, even on
-                # failure — hand off ownership before calling it.
-                pending_path, tmp_path = tmp_path, None
-                fname = audio_fetcher.register_audio_file(pending_path, col)
-
             audio_idx = field_names.index(audio_field)
             note.fields[audio_idx] = f"[sound:{fname}]"
             col.update_note(note)
             result.audio_added += 1
+            applied += 1
+            # Same periodic merge as run_batch — see comment there.
+            if undo_pos is not None and applied % 30 == 0:
+                col.merge_undo_entries(undo_pos)
         except Exception:
             result.audio_errors += 1
             logger.exception(
-                "Unexpected error registering audio for note %d (jpn_id %s)",
+                "Unexpected error applying audio field for note %d (jpn_id %s)",
                 note_id, jpn_id,
             )
-        finally:
-            if tmp_path is not None:
-                try:
-                    audio_fetcher.cleanup_temp_audio(tmp_path)
-                except Exception:
-                    pass
+
+    changes = None
+    if undo_pos is not None:
+        try:
+            changes = col.merge_undo_entries(undo_pos)
+        except Exception:
+            logger.warning("Could not merge audio undo entries", exc_info=True)
     result.pending_audio.clear()
+    return changes
+
+
+def register_pending_audio(items: list, result: BatchResult, col) -> None:
+    """Register phase: store fetched files in col.media and write [sound:] tags.
+
+    PRECONDITION: Must be called from the main thread
+    (col.media.add_file constraint).
+
+    Synchronous composition of register_audio_media() and apply_audio_fields()
+    without undo bracketing — kept for callers that don't run inside a
+    CollectionOp (batch_ui splits the phases itself to get undoable writes).
+    Outcome semantics are documented on the two halves.
+    """
+    registered = register_audio_media(items, result, col)
+    apply_audio_fields(registered, result, col)
 
 
 def process_pending_audio(result: BatchResult, col) -> None:
@@ -273,6 +337,7 @@ def run_batch(
     source_field: str,
     dest_field_pairs: list[tuple[str, str, str | None]],
     skip_existing: bool = True,
+    undo_name: "str | None" = None,
 ) -> BatchResult:
     """
     Run batch processing on all notes of a selected deck.
@@ -297,6 +362,11 @@ def run_batch(
       a filled pair are not re-selected for another pair. Notes where all pairs are
       filled count as skipped_existing and skip the database lookup entirely.
       Default is True.
+    - undo_name (str | None): When set, all note updates are collected into a
+      single named undo entry (add_custom_undo_entry + merge_undo_entries) and
+      the resulting OpChanges is stored on result.changes — pass this when
+      running inside a CollectionOp. When None (default), no undo bracketing
+      is done.
 
     Returns:
     - A BatchResult dataclass with counters for updated, skipped, and errored notes.
@@ -319,6 +389,14 @@ def run_batch(
 
     note_ids = col.find_notes(build_deck_search(col, deck_id))
     field_names_cache: dict[int, list[str]] = {}
+
+    undo_pos = None
+    if undo_name is not None:
+        try:
+            undo_pos = col.add_custom_undo_entry(undo_name)
+        except Exception:
+            logger.warning("Custom undo entry unavailable — batch will not be undoable",
+                           exc_info=True)
 
     conn = sqlite3.connect(db_path)
     try:
@@ -421,11 +499,22 @@ def run_batch(
 
                 col.update_note(note)
                 result.updated += 1
+                # Fold the per-note "Update Note" entries into the custom
+                # entry as we go — Anki's undo queue holds only ~30 steps,
+                # so merging solely at the end would drop entries on large decks.
+                if undo_pos is not None and result.updated % 30 == 0:
+                    col.merge_undo_entries(undo_pos)
 
             except Exception as e:
                 logger.error(f"Error processing note {nid}: {e}", exc_info=True)
                 result.errors += 1
     finally:
         conn.close()
+
+    if undo_pos is not None:
+        try:
+            result.changes = col.merge_undo_entries(undo_pos)
+        except Exception:
+            logger.warning("Could not merge undo entries", exc_info=True)
 
     return result
