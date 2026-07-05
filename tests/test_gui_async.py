@@ -401,13 +401,41 @@ class TestGUIAudioField(unittest.TestCase):
         mock_showInfo.assert_not_called()
 
     @patch('src.ui.GUI.showInfo')
-    def test_audio_skipped_when_not_configured(self, mock_showInfo):
-        """No audio fetch happens when audioDstField is absent from config."""
-        self.mock_config.pop("audioDstField", None)
+    def test_audio_skipped_when_disabled_in_config(self, mock_showInfo):
+        """No audio fetch happens when audioDstField is explicitly empty."""
+        self.mock_config["audioDstField"] = ""
         examples_sentences = [
             {'jp_sentence': 'JP1', 'tr_sentence': 'TR1', 'jpn_id': '8858176', 'has_audio': True}
         ]
         editor = self._make_editor()
+        self._run_flow(editor, examples_sentences)
+
+        self.mock_audio_fetcher.fetch_audio_to_temp.assert_not_called()
+
+    @patch('src.ui.GUI.showInfo')
+    def test_audio_defaults_to_exampleaudio_when_key_absent(self, mock_showInfo):
+        """Absent audioDstField key: the 'ExampleAudio' default applies, so a
+        note that has that field gets audio out of the box."""
+        self.mock_config.pop("audioDstField", None)
+        examples_sentences = [
+            {'jp_sentence': 'JP1', 'tr_sentence': 'TR1', 'jpn_id': '8858176', 'has_audio': True}
+        ]
+        editor = self._make_editor(
+            field_names=['Expression', 'Meaning', 'Reading', 'ExampleAudio'])
+        self._run_flow(editor, examples_sentences)
+
+        self._run_audio_op()
+
+        self.assertEqual(editor.note.fields[3], "[sound:8858176.mp3]")
+
+    @patch('src.ui.GUI.showInfo')
+    def test_audio_skipped_when_default_field_missing_from_note(self, mock_showInfo):
+        """Absent key + note type without an 'ExampleAudio' field: no fetch."""
+        self.mock_config.pop("audioDstField", None)
+        examples_sentences = [
+            {'jp_sentence': 'JP1', 'tr_sentence': 'TR1', 'jpn_id': '8858176', 'has_audio': True}
+        ]
+        editor = self._make_editor()  # fields: Expression/Meaning/Reading/Audio
         self._run_flow(editor, examples_sentences)
 
         self.mock_audio_fetcher.fetch_audio_to_temp.assert_not_called()

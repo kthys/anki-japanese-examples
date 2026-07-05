@@ -62,5 +62,8 @@
     "batch_field_none": "-- Aucun --",
     "batch_error_incomplete_pair": "Veuillez sélectionner un champ Japonais et un champ Traduit pour chaque paire, ou définir les deux sur '-- Aucun --'.",
     "no_valid_dst_fields": "Le(s) champ(s) {missing} sont introuvables dans ce type de note.\nChamps disponibles : {available}\n\nVeuillez mettre à jour les noms de champs dans la configuration du module.",
-    "batch_audio_progress": "Téléchargement de l'audio {current}/{total}..."
+    "batch_audio_progress": "Téléchargement de l'audio {current}/{total}...",
+    "batch_subdeck_label": "Sous-paquet :",
+    "batch_subdeck_all": "Paquet entier (sous-paquets inclus)",
+    "batch_confirm_root_deck": "Vous avez sélectionné le paquet '{deck}' sans choisir de sous-paquet.\nLes {subdecks} sous-paquet(s) ({notes} notes) seront tous traités.\n\nContinuer ?"
 }

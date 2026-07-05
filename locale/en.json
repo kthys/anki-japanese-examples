@@ -62,5 +62,8 @@
     "batch_field_none": "-- None --",
     "batch_error_incomplete_pair": "Please select both a Japanese and Translation field for each pair, or set both to '-- None --'.",
     "no_valid_dst_fields": "Field(s) {missing} not found in this note type.\nAvailable fields: {available}\n\nPlease update your field names in the addon configuration.",
-    "batch_audio_progress": "Downloading audio {current}/{total}..."
+    "batch_audio_progress": "Downloading audio {current}/{total}...",
+    "batch_subdeck_label": "Subdeck:",
+    "batch_subdeck_all": "Entire deck (including subdecks)",
+    "batch_confirm_root_deck": "You selected the deck '{deck}' without choosing a subdeck.\nAll {subdecks} subdeck(s) ({notes} notes) will be processed.\n\nContinue?"
 }
