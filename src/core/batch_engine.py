@@ -22,7 +22,34 @@ except ImportError:
         audio_fetcher = None  # type: ignore
         AudioDownloadError = Exception  # type: ignore
 
+try:
+    from anki.collection import SearchNode
+except Exception:
+    SearchNode = None  # type: ignore
+
 logger = logging.getLogger(__name__)
+
+
+def build_deck_search(col, deck_id: int) -> str:
+    """Return a search string matching a deck AND all of its subdecks.
+
+    Uses Anki's deck: operator (via SearchNode for proper name escaping),
+    which — unlike did: — also matches descendants and cards temporarily
+    moved to a filtered deck (matched by their home deck).
+
+    Falls back to a manually-escaped deck:"name" string when SearchNode is
+    unavailable (old Anki) or fails.
+    """
+    deck_name = col.decks.name(deck_id)
+    if SearchNode is not None:
+        try:
+            return col.build_search_string(SearchNode(deck=deck_name))
+        except Exception:
+            pass
+    escaped = str(deck_name)
+    for ch in ("\\", '"', "*", "_"):
+        escaped = escaped.replace(ch, "\\" + ch)
+    return f'deck:"{escaped}"'
 
 
 def clean_word(word: str) -> str:
@@ -257,7 +284,8 @@ def run_batch(
 
     Args:
     - col: The Anki collection object (``mw.col``).
-    - deck_id (int): The ID of the deck to process.
+    - deck_id (int): The ID of the deck to process. The deck's subdecks are
+      included (see build_deck_search).
     - lang_label (str): Language label for Tatoeba data (e.g. 'English', 'French').
     - source_field (str): Name of the note field containing the word to search.
     - dest_field_pairs (list[tuple[str, str, str | None]]): List of triples of (Japanese,
@@ -289,7 +317,7 @@ def run_batch(
         logger.error(f"Database not found at {db_path}")
         return result
 
-    note_ids = col.find_notes(f"did:{deck_id}")
+    note_ids = col.find_notes(build_deck_search(col, deck_id))
     field_names_cache: dict[int, list[str]] = {}
 
     conn = sqlite3.connect(db_path)

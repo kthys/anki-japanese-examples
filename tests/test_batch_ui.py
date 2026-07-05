@@ -136,6 +136,9 @@ class TestBatchUI(unittest.TestCase):
         self.assertIsNotNone(dialog.deck_combo)
         # Deck combo should have had addItem called for sample deck
         dialog.deck_combo.addItem.assert_called_once_with("Default", 1)
+        # Empty Default and filtered decks must be excluded from the list
+        self.mock_mw.col.decks.all_names_and_ids.assert_called_once_with(
+            skip_empty_default=True, include_filtered=False)
 
     def test_batch_dialog_skip_checkbox_default_checked(self):
         """Skip checkbox should be checked by default."""
@@ -181,6 +184,141 @@ class TestBatchUI(unittest.TestCase):
         dialog = self.batch_ui.DownloadProgressDialog()
         self.assertIsNotNone(dialog.progress_bar)
         self.assertIsNotNone(dialog.log_text)
+
+
+class TestBatchSubdeckSelection(unittest.TestCase):
+    """Tests for the deck/subdeck selection UI and root-deck confirmation."""
+
+    # Reuse the full aqt/Qt mock environment from TestBatchUI
+    setUp = TestBatchUI.setUp
+    tearDown = TestBatchUI.tearDown
+
+    def _make_dialog_with_decks(self, decks, root_id):
+        """Build a dialog, then install a deck tree and select root_id."""
+        dialog = self.batch_ui.BatchDialog()
+        dialog._all_decks = decks
+        dialog.deck_combo.currentData.return_value = root_id
+        return dialog
+
+    def test_deck_combo_lists_top_level_decks_only(self):
+        """Subdecks (names with ::) must not appear in the deck combo."""
+        parent = MagicMock(); parent.name = "Japanese"; parent.id = 1
+        child = MagicMock(); child.name = "Japanese::Vocab"; child.id = 2
+        other = MagicMock(); other.name = "Other"; other.id = 3
+        self.mock_mw.col.decks.all_names_and_ids.return_value = [parent, child, other]
+
+        dialog = self.batch_ui.BatchDialog()
+
+        added = [c.args for c in dialog.deck_combo.addItem.call_args_list]
+        self.assertIn(("Japanese", 1), added)
+        self.assertIn(("Other", 3), added)
+        self.assertNotIn(("Japanese::Vocab", 2), added)
+
+    def test_subdeck_combo_lists_descendants_with_relative_names(self):
+        """All descendants (any depth) appear with root prefix stripped."""
+        decks = [
+            ("Japanese", 1),
+            ("Japanese::Vocab", 2),
+            ("Japanese::Vocab::Ch1", 3),
+            ("Other", 4),
+        ]
+        dialog = self._make_dialog_with_decks(decks, root_id=1)
+        dialog.subdeck_combo.addItem.reset_mock()
+
+        dialog._populate_subdecks()
+
+        added = [c.args for c in dialog.subdeck_combo.addItem.call_args_list]
+        # First entry: "entire deck" sentinel with None data
+        self.assertEqual(added[0][1], None)
+        self.assertIn(("Vocab", 2), added)
+        self.assertIn(("Vocab::Ch1", 3), added)
+        self.assertNotIn(("Other", 4), added)
+        self.assertEqual(dialog._subdeck_count, 2)
+
+    def test_selected_deck_id_prefers_subdeck(self):
+        dialog = self.batch_ui.BatchDialog()
+        dialog.deck_combo.currentData.return_value = 1
+        dialog.subdeck_combo.currentData.return_value = 5
+        self.assertEqual(dialog._selected_deck_id(), 5)
+
+    def test_selected_deck_id_falls_back_to_root(self):
+        dialog = self.batch_ui.BatchDialog()
+        dialog.deck_combo.currentData.return_value = 1
+        dialog.subdeck_combo.currentData.return_value = None
+        self.assertEqual(dialog._selected_deck_id(), 1)
+
+    def test_populate_fields_unions_note_types(self):
+        """Field combos must offer the union of all note types in the subtree."""
+        dialog = self.batch_ui.BatchDialog()
+        dialog.deck_combo.currentData.return_value = 1
+        dialog.subdeck_combo.currentData.return_value = None
+
+        self.mock_mw.col.decks.deck_and_child_ids.return_value = [1, 2]
+        self.mock_mw.col.db.list.return_value = [100, 200]
+        note_types = {
+            100: {"flds": [{"name": "Word"}, {"name": "Meaning"}]},
+            200: {"flds": [{"name": "Kanji"}, {"name": "Word"}]},
+        }
+        self.mock_mw.col.models.get.side_effect = lambda mid: note_types.get(mid)
+
+        dialog._populate_fields()
+
+        self.assertEqual(dialog.current_field_names, ["Word", "Meaning", "Kanji"])
+        dialog.source_field_combo.addItems.assert_called_with(["Word", "Meaning", "Kanji"])
+
+    def test_populate_fields_warns_when_no_notes(self):
+        dialog = self.batch_ui.BatchDialog()
+        dialog.deck_combo.currentData.return_value = 1
+        dialog.subdeck_combo.currentData.return_value = None
+        self.mock_mw.col.decks.deck_and_child_ids.return_value = [1]
+        self.mock_mw.col.db.list.return_value = []
+
+        dialog.deck_status_label.reset_mock()
+        dialog._populate_fields()
+
+        dialog.deck_status_label.show.assert_called_once()
+
+    def _prepare_run(self, dialog, subdeck_data, subdeck_count):
+        """Set up dialog state so _on_run passes validation up to the popup."""
+        dialog.subdeck_combo.currentData.return_value = subdeck_data
+        dialog._subdeck_count = subdeck_count
+        dialog.deck_combo.currentData.return_value = 1
+        self.mock_mw.col.find_notes.return_value = [1, 2, 3]
+        self.mock_operations.QueryOp.reset_mock()
+
+    def test_run_on_root_deck_with_subdecks_asks_confirmation(self):
+        """'Entire deck' + existing subdecks: askUser shown; declining aborts."""
+        dialog = self.batch_ui.BatchDialog()
+        self._prepare_run(dialog, subdeck_data=None, subdeck_count=2)
+        self.mock_utils.askUser.return_value = False
+
+        with patch.object(self.batch_ui.tatoeba_data, 'is_data_available', return_value=True):
+            dialog._on_run()
+
+        self.mock_utils.askUser.assert_called_once()
+        self.mock_operations.QueryOp.assert_not_called()
+
+    def test_run_on_root_deck_confirmation_accepted_runs_batch(self):
+        dialog = self.batch_ui.BatchDialog()
+        self._prepare_run(dialog, subdeck_data=None, subdeck_count=2)
+        self.mock_utils.askUser.return_value = True
+
+        with patch.object(self.batch_ui.tatoeba_data, 'is_data_available', return_value=True):
+            dialog._on_run()
+
+        self.mock_utils.askUser.assert_called_once()
+        self.mock_operations.QueryOp.assert_called_once()
+
+    def test_run_on_subdeck_skips_confirmation(self):
+        """A specific subdeck selection must not trigger the popup."""
+        dialog = self.batch_ui.BatchDialog()
+        self._prepare_run(dialog, subdeck_data=5, subdeck_count=2)
+
+        with patch.object(self.batch_ui.tatoeba_data, 'is_data_available', return_value=True):
+            dialog._on_run()
+
+        self.mock_utils.askUser.assert_not_called()
+        self.mock_operations.QueryOp.assert_called_once()
 
 
 class TestBatchAudioCombo(unittest.TestCase):

@@ -1,7 +1,9 @@
 from aqt import gui_hooks, mw
 from aqt.utils import Qt, QDialog, QVBoxLayout, QLabel, QListWidget, QDialogButtonBox, showInfo
 from aqt.qt import QCheckBox, QLineEdit, QPushButton, QFormLayout, QHBoxLayout
-import os, html
+import os, html, logging
+
+logger = logging.getLogger(__name__)
 
 try:
     from PyQt5.QtCore import QTimer
@@ -388,7 +390,7 @@ def add_example_manually_dialog(editor):
                     # Audio write path — the slow network fetch runs in the
                     # background op; only col.media.add_file() and the note
                     # update happen on the main thread in the success callback.
-                    audio_f = current_config.get("audioDstField", "")
+                    audio_f = current_config.get("audioDstField", "ExampleAudio")
                     if audio_f and audio_f in field_names and fetch_audio_to_temp is not None:
                         audio_field_index = field_names.index(audio_f)
                         chosen_jpn_id = chosen_example.get('jpn_id')
@@ -420,13 +422,16 @@ def add_example_manually_dialog(editor):
                                         mw.col.update_note(note)
                                     editor.loadNote()
                                 except Exception:
-                                    # Silent skip — no error dialog (matches on_audio_failure)
-                                    pass
+                                    # No error dialog — audio is best-effort — but keep a trace
+                                    logger.exception(
+                                        "Failed to register audio for sentence %s", chosen_jpn_id)
 
                             def on_audio_failure(exc):
                                 if audio_op:
                                     _active_ops.discard(audio_op)
-                                # Silent skip — no error dialog
+                                # No error dialog — audio is best-effort — but keep a trace
+                                logger.warning(
+                                    "Audio download failed for sentence %s: %s", chosen_jpn_id, exc)
 
                             if QueryOp:
                                 audio_op = QueryOp(
@@ -441,7 +446,8 @@ def add_example_manually_dialog(editor):
                                 try:
                                     on_audio_success(audio_background(mw.col))
                                 except Exception:
-                                    pass
+                                    logger.exception(
+                                        "Audio fetch failed for sentence %s", chosen_jpn_id)
 
                 show_result_dialog()
 

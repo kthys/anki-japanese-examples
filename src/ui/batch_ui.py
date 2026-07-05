@@ -1,5 +1,7 @@
+import logging
+
 from aqt import mw
-from aqt.utils import QDialog, QVBoxLayout, QLabel, QDialogButtonBox, showInfo, showWarning
+from aqt.utils import QDialog, QVBoxLayout, QLabel, QDialogButtonBox, showInfo, showWarning, askUser
 from aqt.qt import QComboBox, QCheckBox, QPushButton, QHBoxLayout, QAction, QTextEdit, QProgressBar
 from aqt.operations import QueryOp
 
@@ -9,6 +11,8 @@ except ImportError:
     from PyQt5.QtCore import QTimer
 
 _active_ops = set()
+
+logger = logging.getLogger(__name__)
 
 try:
     from ..utils.i18n import _
@@ -135,15 +139,26 @@ class BatchDialog(QDialog):
         exec_title = QLabel(f"<b>{_('batch_execution_section_title')}</b>")
         layout.addWidget(exec_title)
 
-        # Deck selector
+        # Deck selector — top-level decks only; subdecks are picked below
         deck_row = QHBoxLayout()
         deck_label = QLabel(_("batch_deck_label"))
         self.deck_combo = QComboBox()
         self._populate_decks()
-        self.deck_combo.currentIndexChanged.connect(self._populate_fields)
+        self.deck_combo.currentIndexChanged.connect(self._on_deck_changed)
         deck_row.addWidget(deck_label)
         deck_row.addWidget(self.deck_combo)
         layout.addLayout(deck_row)
+
+        # Subdeck selector — narrows the batch to one subtree of the chosen
+        # deck; the default first entry processes the entire deck. Whatever
+        # is selected is processed including its own subdecks.
+        subdeck_row = QHBoxLayout()
+        subdeck_label = QLabel(_("batch_subdeck_label"))
+        self.subdeck_combo = QComboBox()
+        self.subdeck_combo.currentIndexChanged.connect(self._populate_fields)
+        subdeck_row.addWidget(subdeck_label)
+        subdeck_row.addWidget(self.subdeck_combo)
+        layout.addLayout(subdeck_row)
 
         self.deck_status_label = QLabel("")
         self.deck_status_label.setStyleSheet("color: red;")
@@ -209,7 +224,8 @@ class BatchDialog(QDialog):
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
 
-        # Set initial file status and populate fields
+        # Set initial subdeck list, file status, and fields
+        self._populate_subdecks()
         self._update_file_status()
         self._populate_fields()
 
@@ -308,9 +324,11 @@ class BatchDialog(QDialog):
 
     def _populate_decks(self):
         """
-        Populate deck combo from Anki collection.
+        Populate the deck combo with top-level decks only.
 
-        Reads all deck names from the current Anki collection and adds them to the deck selector.
+        Reads all deck names from the current Anki collection, keeps the full
+        list in self._all_decks (used by _populate_subdecks), and adds only
+        decks without a "::" in their name to the deck selector.
 
         Args:
         - None
@@ -318,25 +336,84 @@ class BatchDialog(QDialog):
         Returns:
         - None
         """
+        self._all_decks = []
         try:
-            decks = mw.col.decks.all_names_and_ids()
-            for deck in decks:
-                self.deck_combo.addItem(deck.name, deck.id)
+            decks = mw.col.decks.all_names_and_ids(
+                skip_empty_default=True, include_filtered=False)
+            self._all_decks = [(deck.name, deck.id) for deck in decks]
+            for name, deck_id in self._all_decks:
+                if "::" not in name:
+                    self.deck_combo.addItem(name, deck_id)
         except Exception:
-            pass
+            logger.exception("Failed to populate deck list")
+
+    def _on_deck_changed(self):
+        """Refresh the subdeck list and field combos after a deck change."""
+        self._populate_subdecks()
+        self._populate_fields()
+
+    def _populate_subdecks(self):
+        """
+        Populate the subdeck combo for the currently selected top-level deck.
+
+        The first entry ("Entire deck") carries None as data and means the
+        whole deck including all subdecks. Every descendant (any depth) is
+        then listed with its path relative to the root. Sets
+        self._subdeck_count to the number of descendants found.
+
+        Args:
+        - None (reads from self.deck_combo and self._all_decks).
+
+        Returns:
+        - None
+        """
+        self._subdeck_count = 0
+        # Block signals during repopulation so _populate_fields fires once
+        # (from the caller), not on every addItem.
+        self.subdeck_combo.blockSignals(True)
+        try:
+            self.subdeck_combo.clear()
+            self.subdeck_combo.addItem(_("batch_subdeck_all"), None)
+
+            root_id = self.deck_combo.currentData()
+            root_name = next(
+                (name for name, deck_id in self._all_decks if deck_id == root_id),
+                None,
+            )
+            if root_name:
+                prefix = root_name + "::"
+                for name, deck_id in self._all_decks:
+                    if name.startswith(prefix):
+                        self.subdeck_combo.addItem(name[len(prefix):], deck_id)
+                        self._subdeck_count += 1
+            self.subdeck_combo.setEnabled(self._subdeck_count > 0)
+        except Exception:
+            logger.exception("Failed to populate subdeck list")
+        finally:
+            self.subdeck_combo.blockSignals(False)
+
+    def _selected_deck_id(self):
+        """Return the effective deck id: the chosen subdeck, or the root deck
+        when 'Entire deck' is selected."""
+        subdeck_id = self.subdeck_combo.currentData()
+        if subdeck_id is not None:
+            return subdeck_id
+        return self.deck_combo.currentData()
 
     # ── Field population ────────────────────────────────────────────
 
     def _populate_fields(self):
         """
-        Populate the 3 field selector combos from the selected deck's note type.
+        Populate the field selector combos from the selected deck subtree.
 
-        Reads the first note in the selected deck to discover available field
-        names. If no notes are found, the combos are cleared and a warning is
-        shown in the file status label.
+        Collects every note type used by notes in the effective deck (chosen
+        subdeck or entire deck, subdecks included) and offers the union of
+        their field names, order preserved. run_batch() skips notes that lack
+        the chosen fields, so offering the union is safe for mixed decks.
+        If no notes are found, the combos are cleared and a warning is shown.
 
         Args:
-        - None (reads from self.deck_combo).
+        - None (reads from self.deck_combo / self.subdeck_combo).
 
         Returns:
         - None
@@ -350,19 +427,35 @@ class BatchDialog(QDialog):
             audio_combo.clear()
         self.deck_status_label.hide()
 
-        deck_id = self.deck_combo.currentData()
+        deck_id = self._selected_deck_id()
         if deck_id is None:
             return
 
         try:
-            note_ids = mw.col.find_notes(f"did:{deck_id}")
-            if not note_ids:
+            # Distinct note types across the whole subtree, without loading
+            # every note. odid covers cards temporarily in a filtered deck.
+            dids = list(mw.col.decks.deck_and_child_ids(deck_id))
+            placeholders = ",".join("?" * len(dids))
+            mids = mw.col.db.list(
+                "select distinct mid from notes where id in "
+                f"(select nid from cards where did in ({placeholders}) "
+                f"or odid in ({placeholders}))",
+                *dids, *dids,
+            )
+            if not mids:
                 self.deck_status_label.setText(_("batch_no_fields"))
                 self.deck_status_label.show()
                 return
 
-            note = mw.col.get_note(note_ids[0])
-            self.current_field_names = [fld["name"] for fld in note.note_type()["flds"]]
+            field_names: list = []
+            for mid in mids:
+                note_type = mw.col.models.get(mid)
+                if not note_type:
+                    continue
+                for fld in note_type["flds"]:
+                    if fld["name"] not in field_names:
+                        field_names.append(fld["name"])
+            self.current_field_names = field_names
 
             self.source_field_combo.addItems(self.current_field_names)
             
@@ -378,7 +471,7 @@ class BatchDialog(QDialog):
                 audio_combo.addItem(_("batch_field_none"))
                 audio_combo.addItems(self.current_field_names)
         except Exception:
-            pass
+            logger.exception("Failed to populate field selectors")
 
     # ── Handlers ────────────────────────────────────────────────────
 
@@ -407,7 +500,7 @@ class BatchDialog(QDialog):
                         md = json.load(f)
                         count = md.get(tatoeba_data.LANG_MAP.get(lang), {}).get("count", 0)
             except Exception:
-                pass
+                logger.warning("Could not read pair count from metadata", exc_info=True)
 
             translated = _("batch_file_available")
             if translated != "batch_file_available":
@@ -535,9 +628,33 @@ class BatchDialog(QDialog):
                 showInfo("No Tatoeba data available. Please download data first.")
             return
 
-        deck_id = self.deck_combo.currentData()
+        deck_id = self._selected_deck_id()
         source_field = self.source_field_combo.currentText()
         skip_existing = self.skip_checkbox.isChecked()
+
+        # Root deck chosen with "Entire deck" while subdecks exist: make the
+        # scope explicit before writing to every note in the tree.
+        if self.subdeck_combo.currentData() is None and getattr(self, "_subdeck_count", 0) > 0:
+            try:
+                note_count = len(mw.col.find_notes(
+                    batch_engine.build_deck_search(mw.col, deck_id)))
+            except Exception:
+                note_count = 0
+                logger.warning("Could not count notes for confirmation dialog", exc_info=True)
+            confirm_msg = _("batch_confirm_root_deck")
+            if confirm_msg == "batch_confirm_root_deck":
+                confirm_msg = (
+                    "You selected the deck '{deck}' without choosing a subdeck.\n"
+                    "All {subdecks} subdeck(s) ({notes} notes) will be processed.\n\n"
+                    "Continue?"
+                )
+            confirm_msg = confirm_msg.format(
+                deck=self.deck_combo.currentText(),
+                subdecks=self._subdeck_count,
+                notes=note_count,
+            )
+            if not askUser(confirm_msg, parent=self):
+                return
 
         dest_field_pairs = []
         for jpn_combo, trans_combo, audio_combo in zip(

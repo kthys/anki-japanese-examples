@@ -1116,5 +1116,64 @@ class TestAudioPrioritizationSelection(unittest.TestCase):
             "Pair without audio field should receive a non-audio sentence")
 
 
+class TestBuildDeckSearch(unittest.TestCase):
+    """Tests for build_deck_search() — deck+subdeck search string construction."""
+
+    def test_searchnode_path_used_when_available(self):
+        fake_search_node = MagicMock()
+        with patch('src.core.batch_engine.SearchNode', fake_search_node):
+            col = MagicMock()
+            col.decks.name.return_value = "Japanese"
+            col.build_search_string.return_value = 'deck:Japanese'
+            search = batch_engine.build_deck_search(col, 1)
+
+        fake_search_node.assert_called_once_with(deck="Japanese")
+        self.assertEqual(search, 'deck:Japanese')
+
+    def test_fallback_escapes_special_characters(self):
+        """Without SearchNode, deck names with \\ " * _ must be escaped."""
+        with patch('src.core.batch_engine.SearchNode', None):
+            col = MagicMock()
+            col.decks.name.return_value = 'My "Deck" with \\ and * and _'
+            search = batch_engine.build_deck_search(col, 1)
+
+        self.assertEqual(search, 'deck:"My \\"Deck\\" with \\\\ and \\* and \\_"')
+
+    def test_fallback_used_when_searchnode_rejects_input(self):
+        """SearchNode raising (e.g. non-string name) falls back to manual escaping."""
+        fake_search_node = MagicMock(side_effect=TypeError("bad field"))
+        with patch('src.core.batch_engine.SearchNode', fake_search_node):
+            col = MagicMock()
+            col.decks.name.return_value = "Japanese"
+            search = batch_engine.build_deck_search(col, 1)
+
+        self.assertEqual(search, 'deck:"Japanese"')
+
+    def test_run_batch_uses_deck_search_not_did(self):
+        """run_batch must search by deck name (incl. subdecks), never did:."""
+        temp_fd, temp_db_path = tempfile.mkstemp(suffix=".db")
+        os.close(temp_fd)
+        try:
+            with patch('src.core.batch_engine.SearchNode', None), \
+                 patch('src.core.batch_engine.tatoeba_data') as mock_td:
+                mock_td.LANG_MAP = {"English": "eng"}
+                mock_td.get_db_path.return_value = temp_db_path
+
+                col = MagicMock()
+                col.decks.name.return_value = "Japanese"
+                col.find_notes.return_value = []
+
+                batch_engine.run_batch(
+                    col=col, deck_id=7, lang_label="English",
+                    source_field="Word",
+                    dest_field_pairs=[("Jpn", "Trans", None)],
+                )
+
+            col.decks.name.assert_called_once_with(7)
+            col.find_notes.assert_called_once_with('deck:"Japanese"')
+        finally:
+            os.remove(temp_db_path)
+
+
 if __name__ == '__main__':
     unittest.main()
