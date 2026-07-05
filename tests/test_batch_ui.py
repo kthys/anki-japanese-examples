@@ -587,7 +587,7 @@ class TestBatchReport(unittest.TestCase):
     def test_report_contains_audio_added_count(self):
         """Batch report must contain the audio_added value from BatchResult."""
         from src.core.batch_engine import BatchResult
-        result = BatchResult(updated=10, audio_added=5, audio_skipped=3)
+        result = BatchResult(updated=10, audio_added=5, audio_skipped=3, audio_errors=2)
 
         dialog = self.batch_ui.BatchDialog()
 
@@ -608,6 +608,7 @@ class TestBatchReport(unittest.TestCase):
                 errors=result.errors,
                 audio_added=result.audio_added,
                 audio_skipped=result.audio_skipped,
+                audio_errors=result.audio_errors,
             )
         else:
             # Fallback — code under test must include audio lines here too
@@ -619,13 +620,16 @@ class TestBatchReport(unittest.TestCase):
                 f"Skipped (missing fields): {result.skipped_missing_fields}\n"
                 f"Errors: {result.errors}\n"
                 f"Audio added: {result.audio_added}\n"
-                f"Audio skipped (no recording): {result.audio_skipped}"
+                f"Audio skipped (no recording): {result.audio_skipped}\n"
+                f"Audio errors: {result.audio_errors}"
             )
 
         self.assertIn("5", report)   # audio_added value
         self.assertIn("3", report)   # audio_skipped value
+        self.assertIn("2", report)   # audio_errors value
         self.assertIn("Audio added", report)
         self.assertIn("Audio skipped", report)
+        self.assertIn("Audio errors", report)
 
 
 if __name__ == '__main__':

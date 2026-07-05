@@ -37,7 +37,7 @@
     "batch_jpn_field_label": "Japanese example field:",
     "batch_trans_field_label": "Translated example field:",
     "batch_report_title": "Batch Processing Report",
-    "batch_report_body": "Batch processing complete.\n\nUpdated: {updated}\nSkipped (already have examples): {skipped_existing}\nSkipped (no match found): {skipped_no_match}\nSkipped (missing fields): {skipped_missing}\nErrors: {errors}\nAudio added: {audio_added}\nAudio skipped (no recording): {audio_skipped}",
+    "batch_report_body": "Batch processing complete.\n\nUpdated: {updated}\nSkipped (already have examples): {skipped_existing}\nSkipped (no match found): {skipped_no_match}\nSkipped (missing fields): {skipped_missing}\nErrors: {errors}\nAudio added: {audio_added}\nAudio skipped (no recording): {audio_skipped}\nAudio errors: {audio_errors}",
     "batch_no_data": "No Tatoeba data available. Please download data first.",
     "batch_no_fields": "No fields available. Please select a deck with notes.",
     "batch_progress_title": "Downloading Data",
@@ -61,5 +61,6 @@
     "batch_language_french": "French",
     "batch_field_none": "-- None --",
     "batch_error_incomplete_pair": "Please select both a Japanese and Translation field for each pair, or set both to '-- None --'.",
-    "no_valid_dst_fields": "Field(s) {missing} not found in this note type.\nAvailable fields: {available}\n\nPlease update your field names in the addon configuration."
+    "no_valid_dst_fields": "Field(s) {missing} not found in this note type.\nAvailable fields: {available}\n\nPlease update your field names in the addon configuration.",
+    "batch_audio_progress": "Downloading audio {current}/{total}..."
 }
