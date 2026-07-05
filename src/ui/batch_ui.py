@@ -394,7 +394,7 @@ class BatchDialog(QDialog):
         Returns:
         - None
         """
-        lang = self.language_combo.currentText()
+        lang = self.language_combo.currentData()
         date_str = tatoeba_data.get_file_status(lang)
 
         if date_str:
@@ -426,7 +426,7 @@ class BatchDialog(QDialog):
         if not hasattr(self, 'run_button'):
             return
 
-        lang = self.language_combo.currentText()
+        lang = self.language_combo.currentData()
         if not tatoeba_data.is_data_available(lang):
             self.run_button.setEnabled(False)
             return
@@ -466,7 +466,7 @@ class BatchDialog(QDialog):
         self.download_button.setEnabled(False)
         self.file_status_label.setText(_("batch_downloading") if _("batch_downloading") != "batch_downloading" else "Downloading Tatoeba data...")
 
-        lang = self.language_combo.currentText()
+        lang = self.language_combo.currentData()
 
         # Open custom progress dialog
         self._download_dlg = DownloadProgressDialog(self)
@@ -524,7 +524,7 @@ class BatchDialog(QDialog):
         Returns:
         - None
         """
-        lang = self.language_combo.currentText()
+        lang = self.language_combo.currentData()
 
         # Check data availability
         if not tatoeba_data.is_data_available(lang):
@@ -584,8 +584,6 @@ class BatchDialog(QDialog):
                         callback()
                 check_and_run()
 
-            batch_engine.process_pending_audio(result, mw.col)
-
             def show_report():
                 # Build report
                 translated_title = _("batch_report_title")
@@ -600,6 +598,7 @@ class BatchDialog(QDialog):
                         errors=result.errors,
                         audio_added=result.audio_added,
                         audio_skipped=result.audio_skipped,
+                        audio_errors=result.audio_errors,
                     )
                 else:
                     report = (
@@ -610,13 +609,55 @@ class BatchDialog(QDialog):
                         f"Skipped (missing fields): {result.skipped_missing_fields}\n"
                         f"Errors: {result.errors}\n"
                         f"Audio added: {result.audio_added}\n"
-                        f"Audio skipped (no recording): {result.audio_skipped}"
+                        f"Audio skipped (no recording): {result.audio_skipped}\n"
+                        f"Audio errors: {result.audio_errors}"
                     )
 
                 showInfo(report)
                 self.run_button.setEnabled(True)
 
-            safe_execute(show_report)
+            if not result.pending_audio:
+                safe_execute(show_report)
+                return
+
+            # Audio downloads run in a second background op so the network
+            # I/O never blocks the UI; only the fast register step (media
+            # add_file + note updates) runs on the main thread afterwards.
+            total_audio = len(result.pending_audio)
+            audio_msg = _("batch_audio_progress")
+            if audio_msg == "batch_audio_progress":
+                audio_msg = "Downloading audio {current}/{total}..."
+
+            def audio_progress(current, total):
+                label = audio_msg.format(current=current, total=total)
+                mw.taskman.run_on_main(lambda: mw.progress.update(label=label))
+
+            def audio_background(col):
+                return batch_engine.download_pending_audio(
+                    result, col, progress_cb=audio_progress
+                )
+
+            def on_audio_success(items):
+                _active_ops.discard(audio_op)
+                batch_engine.register_pending_audio(items, result, mw.col)
+                safe_execute(show_report)
+
+            def on_audio_failure(exc):
+                _active_ops.discard(audio_op)
+                # download_pending_audio contains per-item errors, so this only
+                # fires on catastrophic failure — count the whole batch as
+                # errored and still show the report.
+                result.audio_errors += total_audio
+                result.pending_audio.clear()
+                safe_execute(show_report)
+
+            audio_op = QueryOp(
+                parent=self, op=audio_background, success=on_audio_success
+            ).failure(on_audio_failure)
+            _active_ops.add(audio_op)
+            audio_op.with_progress(
+                audio_msg.format(current=1, total=total_audio)
+            ).run_in_background()
 
         def on_failure(exc):
             _active_ops.discard(op)

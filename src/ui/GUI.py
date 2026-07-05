@@ -14,12 +14,13 @@ except ImportError:
     from src.core.japanese_examples import find_japanese_sentence, DST_FIELD_TRANSLATION, DST_FIELD_JAP
 
 try:
-    from ..core.audio_fetcher import download_audio
+    from ..core.audio_fetcher import fetch_audio_to_temp, register_audio_file
 except ImportError:
     try:
-        from src.core.audio_fetcher import download_audio
+        from src.core.audio_fetcher import fetch_audio_to_temp, register_audio_file
     except ImportError:
-        download_audio = None
+        fetch_audio_to_temp = None
+        register_audio_file = None
 
 # Try to import QueryOp for background operations (Anki 2.1.50+)
 try:
@@ -384,23 +385,43 @@ def add_example_manually_dialog(editor):
                     # Update the editor to show the changes
                     editor.loadNote()
 
-                    # Audio write path
+                    # Audio write path — the slow network fetch runs in the
+                    # background op; only col.media.add_file() and the note
+                    # update happen on the main thread in the success callback.
                     audio_f = current_config.get("audioDstField", "")
-                    if audio_f and audio_f in field_names and download_audio is not None:
+                    if audio_f and audio_f in field_names and fetch_audio_to_temp is not None:
                         audio_field_index = field_names.index(audio_f)
                         chosen_jpn_id = chosen_example.get('jpn_id')
                         if chosen_jpn_id is not None:
                             audio_op = None
 
-                            def on_audio_success(_unused):
+                            def audio_background(col):
+                                expected_fname = f"{chosen_jpn_id}.mp3"
+                                if col.media.have(expected_fname):
+                                    return ("exists", expected_fname)
+                                tmp_path = fetch_audio_to_temp(chosen_jpn_id)
+                                if tmp_path is None:
+                                    return ("no_audio", None)
+                                return ("fetched", tmp_path)
+
+                            def on_audio_success(outcome):
                                 if audio_op:
                                     _active_ops.discard(audio_op)
-                                fname = download_audio(chosen_jpn_id, mw.col)
-                                if fname is not None:
+                                status, payload = outcome
+                                if status == "no_audio":
+                                    return
+                                try:
+                                    if status == "exists":
+                                        fname = payload
+                                    else:
+                                        fname = register_audio_file(payload, mw.col)
                                     note.fields[audio_field_index] = f"[sound:{fname}]"
                                     if note.id != 0:
                                         mw.col.update_note(note)
                                     editor.loadNote()
+                                except Exception:
+                                    # Silent skip — no error dialog (matches on_audio_failure)
+                                    pass
 
                             def on_audio_failure(exc):
                                 if audio_op:
@@ -410,13 +431,17 @@ def add_example_manually_dialog(editor):
                             if QueryOp:
                                 audio_op = QueryOp(
                                     parent=editor.parentWindow,
-                                    op=lambda col: None,
+                                    op=audio_background,
                                     success=on_audio_success
                                 ).failure(on_audio_failure)
                                 _active_ops.add(audio_op)
                                 audio_op.run_in_background()
                             else:
-                                on_audio_success(None)
+                                # Fallback for older Anki: blocking call, as before
+                                try:
+                                    on_audio_success(audio_background(mw.col))
+                                except Exception:
+                                    pass
 
                 show_result_dialog()
 

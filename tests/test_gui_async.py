@@ -284,8 +284,10 @@ class TestGUIAudioField(unittest.TestCase):
 
         # Mock audio_fetcher module at the boundary
         self.mock_audio_fetcher = MagicMock()
-        self.mock_download_audio = MagicMock(return_value="8858176.mp3")
-        self.mock_audio_fetcher.download_audio = self.mock_download_audio
+        self.mock_audio_fetcher.fetch_audio_to_temp = MagicMock(
+            return_value="/tmp/x/8858176.mp3")
+        self.mock_audio_fetcher.register_audio_file = MagicMock(
+            return_value="8858176.mp3")
         sys.modules['src.core.audio_fetcher'] = self.mock_audio_fetcher
 
         if 'src.ui.GUI' in sys.modules:
@@ -340,6 +342,17 @@ class TestGUIAudioField(unittest.TestCase):
             timer_call_args = self.mock_pyqt5_qtcore.QTimer.singleShot.call_args[0]
             timer_call_args[1]()
 
+    def _run_audio_op(self, media_have=False):
+        """Simulate the audio QueryOp: run its background op with a mock col,
+        then feed the outcome to the success callback (as Anki would)."""
+        audio_op_call = self.mock_operations.QueryOp.call_args_list[-1]
+        _, audio_kwargs = audio_op_call
+        bg_col = MagicMock()
+        bg_col.media.have.return_value = media_have
+        outcome = audio_kwargs['op'](bg_col)
+        audio_kwargs['success'](outcome)
+        return outcome
+
     @patch('src.ui.GUI.showInfo')
     def test_audio_field_written_when_configured_and_recording_exists(self, mock_showInfo):
         """Audio field gets [sound:filename.mp3] when audioDstField configured and recording exists."""
@@ -349,37 +362,47 @@ class TestGUIAudioField(unittest.TestCase):
         editor = self._make_editor()
         self._run_flow(editor, examples_sentences)
 
-        # Simulate second QueryOp (audio) on_success callback
-        # Find the second QueryOp call (audio op)
-        audio_op_call = self.mock_operations.QueryOp.call_args_list[-1]
-        _, audio_kwargs = audio_op_call
-        audio_success = audio_kwargs['success']
-        audio_success(None)
+        outcome = self._run_audio_op()
 
+        self.assertEqual(outcome, ("fetched", "/tmp/x/8858176.mp3"))
+        self.mock_audio_fetcher.register_audio_file.assert_called_once()
         self.assertEqual(editor.note.fields[3], "[sound:8858176.mp3]")
         mock_showInfo.assert_not_called()
 
     @patch('src.ui.GUI.showInfo')
+    def test_audio_field_written_without_fetch_when_already_in_media(self, mock_showInfo):
+        """File already in col.media: tag written, no download performed."""
+        examples_sentences = [
+            {'jp_sentence': 'JP1', 'tr_sentence': 'TR1', 'jpn_id': '8858176', 'has_audio': True}
+        ]
+        editor = self._make_editor()
+        self._run_flow(editor, examples_sentences)
+
+        outcome = self._run_audio_op(media_have=True)
+
+        self.assertEqual(outcome, ("exists", "8858176.mp3"))
+        self.mock_audio_fetcher.fetch_audio_to_temp.assert_not_called()
+        self.assertEqual(editor.note.fields[3], "[sound:8858176.mp3]")
+
+    @patch('src.ui.GUI.showInfo')
     def test_audio_field_empty_when_no_recording(self, mock_showInfo):
-        """Audio field stays empty when download_audio returns None."""
-        self.mock_download_audio.return_value = None
+        """Audio field stays empty when the fetch reports no recording (404)."""
+        self.mock_audio_fetcher.fetch_audio_to_temp.return_value = None
         examples_sentences = [
             {'jp_sentence': 'JP1', 'tr_sentence': 'TR1', 'jpn_id': '8858176', 'has_audio': False}
         ]
         editor = self._make_editor()
         self._run_flow(editor, examples_sentences)
 
-        audio_op_call = self.mock_operations.QueryOp.call_args_list[-1]
-        _, audio_kwargs = audio_op_call
-        audio_success = audio_kwargs['success']
-        audio_success(None)
+        self._run_audio_op()
 
         self.assertNotEqual(editor.note.fields[3], "[sound:8858176.mp3]")
+        self.mock_audio_fetcher.register_audio_file.assert_not_called()
         mock_showInfo.assert_not_called()
 
     @patch('src.ui.GUI.showInfo')
     def test_audio_skipped_when_not_configured(self, mock_showInfo):
-        """download_audio is never called when audioDstField is absent from config."""
+        """No audio fetch happens when audioDstField is absent from config."""
         self.mock_config.pop("audioDstField", None)
         examples_sentences = [
             {'jp_sentence': 'JP1', 'tr_sentence': 'TR1', 'jpn_id': '8858176', 'has_audio': True}
@@ -387,18 +410,18 @@ class TestGUIAudioField(unittest.TestCase):
         editor = self._make_editor()
         self._run_flow(editor, examples_sentences)
 
-        self.mock_download_audio.assert_not_called()
+        self.mock_audio_fetcher.fetch_audio_to_temp.assert_not_called()
 
     @patch('src.ui.GUI.showInfo')
     def test_audio_skipped_when_jpn_id_none(self, mock_showInfo):
-        """download_audio is never called when jpn_id is None."""
+        """No audio fetch happens when jpn_id is None."""
         examples_sentences = [
             {'jp_sentence': 'JP1', 'tr_sentence': 'TR1', 'jpn_id': None, 'has_audio': False}
         ]
         editor = self._make_editor()
         self._run_flow(editor, examples_sentences)
 
-        self.mock_download_audio.assert_not_called()
+        self.mock_audio_fetcher.fetch_audio_to_temp.assert_not_called()
 
 
 if __name__ == '__main__':

@@ -37,7 +37,7 @@
     "batch_jpn_field_label": "Champ exemple japonais :",
     "batch_trans_field_label": "Champ exemple traduit :",
     "batch_report_title": "Rapport de traitement en lot",
-    "batch_report_body": "Traitement en lot terminé.\n\nMis à jour : {updated}\nIgnorés (exemples existants) : {skipped_existing}\nIgnorés (aucune correspondance) : {skipped_no_match}\nIgnorés (champs manquants) : {skipped_missing}\nErreurs : {errors}\nAudio ajouté : {audio_added}\nIgnorés (aucun enregistrement) : {audio_skipped}",
+    "batch_report_body": "Traitement en lot terminé.\n\nMis à jour : {updated}\nIgnorés (exemples existants) : {skipped_existing}\nIgnorés (aucune correspondance) : {skipped_no_match}\nIgnorés (champs manquants) : {skipped_missing}\nErreurs : {errors}\nAudio ajouté : {audio_added}\nIgnorés (aucun enregistrement) : {audio_skipped}\nErreurs audio : {audio_errors}",
     "batch_no_data": "Aucune donnée Tatoeba disponible. Veuillez d'abord télécharger les données.",
     "batch_no_fields": "Aucun champ disponible. Veuillez sélectionner un deck contenant des notes.",
     "batch_progress_title": "Téléchargement des données",
@@ -61,5 +61,6 @@
     "batch_language_french": "Français",
     "batch_field_none": "-- Aucun --",
     "batch_error_incomplete_pair": "Veuillez sélectionner un champ Japonais et un champ Traduit pour chaque paire, ou définir les deux sur '-- Aucun --'.",
-    "no_valid_dst_fields": "Le(s) champ(s) {missing} sont introuvables dans ce type de note.\nChamps disponibles : {available}\n\nVeuillez mettre à jour les noms de champs dans la configuration du module."
+    "no_valid_dst_fields": "Le(s) champ(s) {missing} sont introuvables dans ce type de note.\nChamps disponibles : {available}\n\nVeuillez mettre à jour les noms de champs dans la configuration du module.",
+    "batch_audio_progress": "Téléchargement de l'audio {current}/{total}..."
 }
