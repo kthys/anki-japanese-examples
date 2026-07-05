@@ -1,14 +1,9 @@
 from aqt import gui_hooks, mw
 from aqt.utils import Qt, QDialog, QVBoxLayout, QLabel, QListWidget, QDialogButtonBox, showInfo
-from aqt.qt import QCheckBox, QLineEdit, QPushButton, QFormLayout, QHBoxLayout
+from aqt.qt import QCheckBox, QLineEdit, QPushButton, QFormLayout, QHBoxLayout, QTimer
 import os, html, logging
 
 logger = logging.getLogger(__name__)
-
-try:
-    from PyQt5.QtCore import QTimer
-except ImportError:
-    from PyQt6.QtCore import QTimer
 
 try:
     from ..core.japanese_examples import find_japanese_sentence, DST_FIELD_TRANSLATION, DST_FIELD_JAP

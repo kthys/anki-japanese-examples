@@ -2,13 +2,8 @@ import logging
 
 from aqt import mw
 from aqt.utils import QDialog, QVBoxLayout, QLabel, QDialogButtonBox, showInfo, showWarning, askUser
-from aqt.qt import QComboBox, QCheckBox, QPushButton, QHBoxLayout, QAction, QTextEdit, QProgressBar
-from aqt.operations import QueryOp
-
-try:
-    from PyQt6.QtCore import QTimer
-except ImportError:
-    from PyQt5.QtCore import QTimer
+from aqt.qt import QComboBox, QCheckBox, QPushButton, QHBoxLayout, QAction, QTextEdit, QProgressBar, QTimer
+from aqt.operations import QueryOp, CollectionOp
 
 _active_ops = set()
 
@@ -680,18 +675,31 @@ class BatchDialog(QDialog):
 
         self.run_button.setEnabled(False)
 
+        undo_name = _("batch_undo_entry")
+        if undo_name == "batch_undo_entry":
+            undo_name = "Add Japanese examples"
+
+        # The batch runs as a CollectionOp (not QueryOp) so every note write
+        # lands in one named, undoable entry and open windows refresh when it
+        # completes. A CollectionOp's op must return OpChanges and its success
+        # callback receives only those — the BatchResult travels via holder.
+        holder = {}
+
         def background_func(col):
-            return batch_engine.run_batch(
+            holder["result"] = batch_engine.run_batch(
                 col=col,
                 deck_id=deck_id,
                 lang_label=lang,
                 source_field=source_field,
                 dest_field_pairs=dest_field_pairs,
                 skip_existing=skip_existing,
+                undo_name=undo_name,
             )
+            return holder["result"].changes
 
-        def on_success(result):
+        def on_success(_changes):
             _active_ops.discard(op)
+            result = holder["result"]
 
             def safe_execute(callback):
                 def check_and_run():
@@ -756,8 +764,39 @@ class BatchDialog(QDialog):
 
             def on_audio_success(items):
                 _active_ops.discard(audio_op)
-                batch_engine.register_pending_audio(items, result, mw.col)
-                safe_execute(show_report)
+                # Media registration (add_file) must stay on the main thread,
+                # and media files aren't covered by undo anyway. The note
+                # field writes go into a second CollectionOp below so the
+                # [sound:] tags land in their own named undo entry.
+                registered = batch_engine.register_audio_media(items, result, mw.col)
+                if not registered:
+                    result.pending_audio.clear()
+                    safe_execute(show_report)
+                    return
+
+                audio_undo_name = _("batch_audio_undo_entry")
+                if audio_undo_name == "batch_audio_undo_entry":
+                    audio_undo_name = "Add example audio"
+
+                def apply_func(col):
+                    return batch_engine.apply_audio_fields(
+                        registered, result, col, undo_name=audio_undo_name)
+
+                def on_apply_success(_apply_changes):
+                    _active_ops.discard(apply_op)
+                    safe_execute(show_report)
+
+                def on_apply_failure(exc):
+                    _active_ops.discard(apply_op)
+                    logger.error("Applying audio fields failed: %s", exc)
+                    result.audio_errors += len(registered)
+                    result.pending_audio.clear()
+                    safe_execute(show_report)
+
+                apply_op = CollectionOp(parent=self, op=apply_func).success(
+                    on_apply_success).failure(on_apply_failure)
+                _active_ops.add(apply_op)
+                apply_op.run_in_background()
 
             def on_audio_failure(exc):
                 _active_ops.discard(audio_op)
@@ -780,14 +819,10 @@ class BatchDialog(QDialog):
             _active_ops.discard(op)
             showWarning(f"Operation failed: {exc}")
 
-        op = QueryOp(parent=self, op=background_func, success=on_success).failure(on_failure)
+        op = CollectionOp(parent=self, op=background_func).success(
+            on_success).failure(on_failure)
         _active_ops.add(op)
-
-        progress_msg = _("batch_running")
-        if progress_msg == "batch_running":
-            progress_msg = "Running batch process..."
-
-        op.with_progress(progress_msg).run_in_background()
+        op.run_in_background()
 
 
 def register_batch_menu():

@@ -65,5 +65,7 @@
     "batch_audio_progress": "Téléchargement de l'audio {current}/{total}...",
     "batch_subdeck_label": "Sous-paquet :",
     "batch_subdeck_all": "Paquet entier (sous-paquets inclus)",
-    "batch_confirm_root_deck": "Vous avez sélectionné le paquet '{deck}' sans choisir de sous-paquet.\nLes {subdecks} sous-paquet(s) ({notes} notes) seront tous traités.\n\nContinuer ?"
+    "batch_confirm_root_deck": "Vous avez sélectionné le paquet '{deck}' sans choisir de sous-paquet.\nLes {subdecks} sous-paquet(s) ({notes} notes) seront tous traités.\n\nContinuer ?",
+    "batch_undo_entry": "Ajouter des exemples japonais",
+    "batch_audio_undo_entry": "Ajouter l'audio des exemples"
 }

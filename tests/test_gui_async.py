@@ -16,11 +16,8 @@ class TestGUIAsync(unittest.TestCase):
         self.mock_utils = MagicMock()
         self.mock_gui_hooks = MagicMock()
 
-        # Mock PyQt5
-        self.mock_pyqt5 = MagicMock()
-        self.mock_pyqt5_qtcore = MagicMock()
-        self.mock_pyqt5.QtCore = self.mock_pyqt5_qtcore
-        self.mock_pyqt5_qtcore.QTimer = MagicMock()
+        # Mock aqt.qt — GUI imports QTimer (and other Qt classes) from here
+        self.mock_qt = MagicMock()
 
         # Patch sys.modules to simulate aqt existence
         self.modules_patcher = patch.dict(sys.modules, {
@@ -29,9 +26,7 @@ class TestGUIAsync(unittest.TestCase):
             'aqt.operations': self.mock_operations,
             'aqt.utils': self.mock_utils,
             'aqt.gui_hooks': self.mock_gui_hooks,
-            'aqt.qt': MagicMock(),
-            'PyQt5': self.mock_pyqt5,
-            'PyQt5.QtCore': self.mock_pyqt5_qtcore
+            'aqt.qt': self.mock_qt,
         })
         self.modules_patcher.start()
 
@@ -127,8 +122,8 @@ class TestGUIAsync(unittest.TestCase):
 
         # Execute the scheduled function by QTimer
         # Verify singleShot called
-        self.mock_pyqt5_qtcore.QTimer.singleShot.assert_called()
-        timer_args = self.mock_pyqt5_qtcore.QTimer.singleShot.call_args[0]
+        self.mock_qt.QTimer.singleShot.assert_called()
+        timer_args = self.mock_qt.QTimer.singleShot.call_args[0]
         # singleShot(delay, func)
         scheduled_func = timer_args[1]
         scheduled_func()
@@ -175,8 +170,8 @@ class TestGUIAsync(unittest.TestCase):
                 self.GUI.add_example_manually_dialog(editor)
 
                 # QTimer should have been called in on_success
-                self.mock_pyqt5_qtcore.QTimer.singleShot.assert_called()
-                timer_args = self.mock_pyqt5_qtcore.QTimer.singleShot.call_args[0]
+                self.mock_qt.QTimer.singleShot.assert_called()
+                timer_args = self.mock_qt.QTimer.singleShot.call_args[0]
                 scheduled_func = timer_args[1]
                 scheduled_func()
 
@@ -243,10 +238,7 @@ class TestGUIAudioField(unittest.TestCase):
         self.mock_operations = MagicMock()
         self.mock_utils = MagicMock()
         self.mock_gui_hooks = MagicMock()
-        self.mock_pyqt5 = MagicMock()
-        self.mock_pyqt5_qtcore = MagicMock()
-        self.mock_pyqt5.QtCore = self.mock_pyqt5_qtcore
-        self.mock_pyqt5_qtcore.QTimer = MagicMock()
+        self.mock_qt = MagicMock()
 
         self.modules_patcher = patch.dict(sys.modules, {
             'aqt': self.mock_aqt,
@@ -254,9 +246,7 @@ class TestGUIAudioField(unittest.TestCase):
             'aqt.operations': self.mock_operations,
             'aqt.utils': self.mock_utils,
             'aqt.gui_hooks': self.mock_gui_hooks,
-            'aqt.qt': MagicMock(),
-            'PyQt5': self.mock_pyqt5,
-            'PyQt5.QtCore': self.mock_pyqt5_qtcore
+            'aqt.qt': self.mock_qt,
         })
         self.modules_patcher.start()
 
@@ -339,7 +329,7 @@ class TestGUIAudioField(unittest.TestCase):
             success_callback(examples_sentences)
 
             # Invoke QTimer scheduled function
-            timer_call_args = self.mock_pyqt5_qtcore.QTimer.singleShot.call_args[0]
+            timer_call_args = self.mock_qt.QTimer.singleShot.call_args[0]
             timer_call_args[1]()
 
     def _run_audio_op(self, media_have=False):

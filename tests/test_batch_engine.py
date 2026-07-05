@@ -568,20 +568,124 @@ class TestProcessPendingAudio(unittest.TestCase):
         self.assertEqual(len(result.pending_audio), 2)
 
     @patch('src.core.batch_engine.audio_fetcher')
-    def test_register_phase_cleans_up_temp_on_error(self, mock_af):
-        """A fetched temp file must be cleaned up if registration cannot happen."""
+    def test_media_phase_registers_temp_and_apply_errors_are_contained(self, mock_af):
+        """register_audio_media hands the temp to register_audio_file (which
+        owns cleanup); an apply-phase failure counts as audio_errors without
+        aborting other items."""
         from src.core.batch_engine import register_pending_audio, AUDIO_FETCHED
         mock_af.AudioDownloadError = AudioDownloadError
+        mock_af.register_audio_file.side_effect = ["11111.mp3", "22222.mp3"]
 
+        good_note = self._make_mock_note({"Audio": ""}, field_order=["Audio"])
         col = MagicMock()
-        col.get_note.side_effect = KeyError("note not found")
+
+        def get_note(nid):
+            if nid == 1:
+                raise KeyError("note not found")
+            return good_note
+        col.get_note.side_effect = get_note
 
         result = BatchResult()
-        items = [(1, "Audio", "12345", AUDIO_FETCHED, "/tmp/x/12345.mp3")]
+        items = [
+            (1, "Audio", "11111", AUDIO_FETCHED, "/tmp/x/11111.mp3"),
+            (2, "Audio", "22222", AUDIO_FETCHED, "/tmp/x/22222.mp3"),
+        ]
         register_pending_audio(items, result, col)
 
+        # Both temp files were handed to register_audio_file (temp cleanup
+        # is its responsibility, covered by test_audio_fetcher)
+        self.assertEqual(mock_af.register_audio_file.call_count, 2)
         self.assertEqual(result.audio_errors, 1)
-        mock_af.cleanup_temp_audio.assert_called_once_with("/tmp/x/12345.mp3")
+        self.assertEqual(result.audio_added, 1)
+        self.assertEqual(good_note.fields[0], "[sound:22222.mp3]")
+
+
+class TestUndoBracketing(unittest.TestCase):
+    """Tests for the named-undo-entry bracketing in run_batch and apply_audio_fields."""
+
+    def setUp(self):
+        self.temp_db_fd, self.temp_db_path = tempfile.mkstemp(suffix=".db")
+        os.close(self.temp_db_fd)
+
+    def tearDown(self):
+        if os.path.exists(self.temp_db_path):
+            os.remove(self.temp_db_path)
+
+    def _make_col_with_one_note(self):
+        note = MagicMock()
+        note.fields = ["猫", "", ""]
+        note.note_type.return_value = {
+            "flds": [{"name": n} for n in ["Word", "Jpn", "Trans"]]
+        }
+        col = MagicMock()
+        col.find_notes.return_value = [1]
+        col.get_note.return_value = note
+        return col
+
+    @patch('src.core.batch_engine.tatoeba_data')
+    def test_run_batch_with_undo_name_brackets_and_stores_changes(self, mock_td):
+        mock_td.LANG_MAP = {"English": "eng"}
+        mock_td.get_db_path.return_value = self.temp_db_path
+        mock_td.search_word.return_value = [("10", "猫A。", "Cat A.", 0)]
+
+        col = self._make_col_with_one_note()
+        col.add_custom_undo_entry.return_value = 42
+        col.merge_undo_entries.return_value = "OPCHANGES"
+
+        result = batch_engine.run_batch(
+            col=col, deck_id=1, lang_label="English",
+            source_field="Word",
+            dest_field_pairs=[("Jpn", "Trans", None)],
+            undo_name="Add Japanese examples",
+        )
+
+        col.add_custom_undo_entry.assert_called_once_with("Add Japanese examples")
+        col.merge_undo_entries.assert_called_with(42)
+        self.assertEqual(result.changes, "OPCHANGES")
+        self.assertEqual(result.updated, 1)
+
+    @patch('src.core.batch_engine.tatoeba_data')
+    def test_run_batch_without_undo_name_skips_bracketing(self, mock_td):
+        mock_td.LANG_MAP = {"English": "eng"}
+        mock_td.get_db_path.return_value = self.temp_db_path
+        mock_td.search_word.return_value = [("10", "猫A。", "Cat A.", 0)]
+
+        col = self._make_col_with_one_note()
+
+        result = batch_engine.run_batch(
+            col=col, deck_id=1, lang_label="English",
+            source_field="Word",
+            dest_field_pairs=[("Jpn", "Trans", None)],
+        )
+
+        col.add_custom_undo_entry.assert_not_called()
+        col.merge_undo_entries.assert_not_called()
+        self.assertIsNone(result.changes)
+        self.assertEqual(result.updated, 1)
+
+    def test_apply_audio_fields_brackets_and_returns_changes(self):
+        from src.core.batch_engine import apply_audio_fields
+
+        note = MagicMock()
+        note.fields = [""]
+        note.note_type.return_value = {"flds": [{"name": "Audio"}]}
+        col = MagicMock()
+        col.get_note.return_value = note
+        col.add_custom_undo_entry.return_value = 7
+        col.merge_undo_entries.return_value = "AUDIOCHANGES"
+
+        result = BatchResult()
+        result.pending_audio.append(("111", 1, "Audio"))
+        changes = apply_audio_fields(
+            [(1, "Audio", "111", "111.mp3")], result, col,
+            undo_name="Add example audio")
+
+        col.add_custom_undo_entry.assert_called_once_with("Add example audio")
+        col.merge_undo_entries.assert_called_with(7)
+        self.assertEqual(changes, "AUDIOCHANGES")
+        self.assertEqual(result.audio_added, 1)
+        self.assertEqual(note.fields[0], "[sound:111.mp3]")
+        self.assertEqual(result.pending_audio, [])
 
 
 class TestPerPairSkipLogic(unittest.TestCase):

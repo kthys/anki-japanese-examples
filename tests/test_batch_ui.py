@@ -284,7 +284,7 @@ class TestBatchSubdeckSelection(unittest.TestCase):
         dialog._subdeck_count = subdeck_count
         dialog.deck_combo.currentData.return_value = 1
         self.mock_mw.col.find_notes.return_value = [1, 2, 3]
-        self.mock_operations.QueryOp.reset_mock()
+        self.mock_operations.CollectionOp.reset_mock()
 
     def test_run_on_root_deck_with_subdecks_asks_confirmation(self):
         """'Entire deck' + existing subdecks: askUser shown; declining aborts."""
@@ -296,7 +296,7 @@ class TestBatchSubdeckSelection(unittest.TestCase):
             dialog._on_run()
 
         self.mock_utils.askUser.assert_called_once()
-        self.mock_operations.QueryOp.assert_not_called()
+        self.mock_operations.CollectionOp.assert_not_called()
 
     def test_run_on_root_deck_confirmation_accepted_runs_batch(self):
         dialog = self.batch_ui.BatchDialog()
@@ -307,7 +307,7 @@ class TestBatchSubdeckSelection(unittest.TestCase):
             dialog._on_run()
 
         self.mock_utils.askUser.assert_called_once()
-        self.mock_operations.QueryOp.assert_called_once()
+        self.mock_operations.CollectionOp.assert_called_once()
 
     def test_run_on_subdeck_skips_confirmation(self):
         """A specific subdeck selection must not trigger the popup."""
@@ -318,7 +318,24 @@ class TestBatchSubdeckSelection(unittest.TestCase):
             dialog._on_run()
 
         self.mock_utils.askUser.assert_not_called()
-        self.mock_operations.QueryOp.assert_called_once()
+        self.mock_operations.CollectionOp.assert_called_once()
+
+    def test_run_batch_op_returns_changes_for_collection_op(self):
+        """The CollectionOp op must call run_batch with an undo_name and
+        return result.changes (the OpChanges) to the framework."""
+        dialog = self.batch_ui.BatchDialog()
+        self._prepare_run(dialog, subdeck_data=5, subdeck_count=0)
+
+        with patch.object(self.batch_ui.tatoeba_data, 'is_data_available', return_value=True), \
+             patch.object(self.batch_ui.batch_engine, 'run_batch') as mock_run:
+            mock_run.return_value = MagicMock(changes="OPCHANGES")
+            dialog._on_run()
+
+            op_callable = self.mock_operations.CollectionOp.call_args.kwargs['op']
+            returned = op_callable(MagicMock())
+
+        self.assertEqual(returned, "OPCHANGES")
+        self.assertIsNotNone(mock_run.call_args.kwargs.get('undo_name'))
 
 
 class TestBatchAudioCombo(unittest.TestCase):
