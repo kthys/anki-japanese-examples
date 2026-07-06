@@ -17,6 +17,7 @@
     "japanese_field_label": "Nom du champ Japonais :",
     "translation_field_label": "Nom du champ Traduction :",
     "audio_field_label": "Nom du champ Audio :",
+    "max_sentence_options_label": "Nombre de phrases proposées :",
     "deck_preferences_reset": "Les préférences de paquet ont été réinitialisées.",
     "deck_preference_info_tooltip": "Cette préférence peut être réinitialisée dans les paramètres de l'addon.",
     "batch_menu_action": "Traiter les exemples en lot",

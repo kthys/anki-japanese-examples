@@ -278,6 +278,14 @@ def add_example_manually_dialog(editor):
             config['deck_preferences'] = deck_prefs
             mw.addonManager.writeConfig(addon_name, config)
 
+    # How many sentence options to fetch and show in the selection dialog
+    try:
+        max_options = int(config.get("maxSentenceOptions", 30))
+    except (TypeError, ValueError):
+        max_options = 30
+    if max_options < 1:
+        max_options = 30
+
     # Define op variable to be accessible in on_success
     op = None
 
@@ -455,14 +463,14 @@ def add_example_manually_dialog(editor):
         # (Browser/Add window) instead of the main window. This ensures focus returns correctly when closing.
         op = QueryOp(
             parent=editor.parentWindow,
-            op=lambda col: find_japanese_sentence(japanese_word, target_lang),
+            op=lambda col: find_japanese_sentence(japanese_word, target_lang, max_results=max_options),
             success=on_success
         )
         _active_ops.add(op)
         op.with_progress(_("searching")).run_in_background()
     else:
         # Fallback for older versions: blocking call
-        examples_sentences = find_japanese_sentence(japanese_word, target_lang)
+        examples_sentences = find_japanese_sentence(japanese_word, target_lang, max_results=max_options)
         on_success(examples_sentences)
 
 def add_examples_buttons(buttons, editor):

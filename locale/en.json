@@ -17,6 +17,7 @@
     "japanese_field_label": "Japanese Field Name:",
     "translation_field_label": "Translation Field Name:",
     "audio_field_label": "Audio Field Name:",
+    "max_sentence_options_label": "Sentence options shown:",
     "deck_preferences_reset": "Deck preferences have been reset.",
     "deck_preference_info_tooltip": "This preference can be reset in the addon's settings.",
     "batch_menu_action": "Batch process examples",

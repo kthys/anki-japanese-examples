@@ -73,26 +73,100 @@ class TestJapaneseExamples(unittest.TestCase):
         self.assertEqual(first_call_params['from'], 'jpn')
         self.assertEqual(first_call_params['to'], lang)
         self.assertEqual(first_call_params['has_audio'], 'yes')
-        self.assertEqual(first_call_params['limit'], 50)
+        self.assertEqual(first_call_params['limit'], 10)
+        self.assertEqual(first_call_params['page'], 1)
 
         if len(call_list) > 1:
             second_call_params = call_list[1][1]['params']
             self.assertNotIn('has_audio', second_call_params)
-            self.assertEqual(second_call_params['limit'], 50)
+            self.assertEqual(second_call_params['limit'], 10)
+            self.assertEqual(second_call_params['page'], 1)
 
-    def test_find_japanese_sentence_custom_max_results(self):
-        """Should pass the max_results value as the limit param in both calls."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {}
-        self.mock_session.get.return_value = mock_response
+    # ── Pagination ──────────────────────────────────────────────────
 
-        self.japanese_examples.find_japanese_sentence("word", "eng", max_results=10)
+    def _page_response(self, results, next_page):
+        """Build a mock response with results and paging metadata."""
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {
+            'results': results,
+            'paging': {'Sentences': {'nextPage': next_page}},
+        }
+        return response
 
+    def _make_results(self, start, count, audios=False):
+        return [
+            {
+                'id': i,
+                'text': f'文{i}',
+                'transcriptions': [{'needsReview': False}],
+                'translations': [[{'text': f'Sentence {i}'}]],
+                'audios': [{'id': i, 'author': 'a'}] if audios else [],
+            }
+            for i in range(start, start + count)
+        ]
+
+    def test_pagination_fetches_multiple_pages_until_max_results(self):
+        """Should walk the page param until max_results sentences are collected."""
+        self.mock_session.get.side_effect = [
+            self._page_response(self._make_results(1, 10, audios=True), next_page=True),
+            self._page_response(self._make_results(11, 10, audios=True), next_page=True),
+            self._page_response(self._make_results(21, 10, audios=True), next_page=True),
+        ]
+
+        result = self.japanese_examples.find_japanese_sentence("test", "eng", max_results=25)
+
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 25)
         call_list = self.mock_session.get.call_args_list
-        self.assertEqual(call_list[0][1]['params']['limit'], 10)
-        if len(call_list) > 1:
-            self.assertEqual(call_list[1][1]['params']['limit'], 10)
+        self.assertEqual(len(call_list), 3)
+        self.assertEqual([c[1]['params']['page'] for c in call_list], [1, 2, 3])
+
+    def test_pagination_stops_when_no_next_page(self):
+        """Should stop requesting pages when the API reports no next page."""
+        self.mock_session.get.side_effect = [
+            # audio query: one page only
+            self._page_response(self._make_results(1, 5, audios=True), next_page=False),
+            # fill query: one page only
+            self._page_response(self._make_results(101, 5), next_page=False),
+        ]
+
+        result = self.japanese_examples.find_japanese_sentence("test", "eng", max_results=50)
+
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 10)
+        self.assertEqual(self.mock_session.get.call_count, 2)
+
+    def test_pagination_returns_partial_results_on_later_page_failure(self):
+        """A failure on page 2+ should return the sentences already gathered."""
+        RequestException = self.mock_requests.exceptions.RequestException
+        self.mock_session.get.side_effect = [
+            self._page_response(self._make_results(1, 10, audios=True), next_page=True),
+            RequestException("boom"),
+            # fill query still runs after the audio query's partial failure
+            self._page_response([], next_page=False),
+        ]
+
+        result = self.japanese_examples.find_japanese_sentence("test", "eng", max_results=30)
+
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 10)
+
+    def test_fill_query_excludes_sentences_already_found_with_audio(self):
+        """Fill query results duplicated from the audio query should be dropped."""
+        audio_results = self._make_results(1, 3, audios=True)
+        # fill returns one duplicate (id 1) and two new sentences
+        fill_results = self._make_results(1, 1) + self._make_results(50, 2)
+        self.mock_session.get.side_effect = [
+            self._page_response(audio_results, next_page=False),
+            self._page_response(fill_results, next_page=False),
+        ]
+
+        result = self.japanese_examples.find_japanese_sentence("test", "eng", max_results=10)
+
+        self.assertEqual(len(result), 5)
+        ids = [s['jpn_id'] for s in result]
+        self.assertEqual(len(ids), len(set(ids)), "Duplicate jpn_ids in results")
 
     # ── Response parsing ────────────────────────────────────────────
 

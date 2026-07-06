@@ -1,6 +1,6 @@
 from aqt import mw
 from aqt.utils import QDialog, QVBoxLayout, QPushButton, QFormLayout, QDialogButtonBox, showInfo
-from aqt.qt import QLineEdit
+from aqt.qt import QLineEdit, QSpinBox
 
 try:
     from ..utils.i18n import _
@@ -39,6 +39,15 @@ class ConfigDialog(QDialog):
         self.audio_field = QLineEdit(self.config.get("audioDstField", "ExampleAudio"))
         form_layout.addRow(_("audio_field_label"), self.audio_field)
 
+        # Number of sentence options shown when adding an example
+        self.max_options = QSpinBox()
+        self.max_options.setRange(1, 100)
+        try:
+            self.max_options.setValue(int(self.config.get("maxSentenceOptions", 30)))
+        except (TypeError, ValueError):
+            self.max_options.setValue(30)
+        form_layout.addRow(_("max_sentence_options_label"), self.max_options)
+
         layout.addLayout(form_layout)
 
         # Reset Deck Preferences Button
@@ -65,6 +74,7 @@ class ConfigDialog(QDialog):
         self.config["japaneseDstField"] = self.jp_field.text()
         self.config["translationDstField"] = self.tr_field.text()
         self.config["audioDstField"] = self.audio_field.text()
+        self.config["maxSentenceOptions"] = self.max_options.value()
 
         # Clean up legacy multi-fields if present
         for key in ["japaneseDstField2", "japaneseDstField3", "translationDstField2", "translationDstField3"]:

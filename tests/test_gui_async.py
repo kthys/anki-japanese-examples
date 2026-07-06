@@ -173,7 +173,7 @@ class TestGUIAsync(unittest.TestCase):
                 scheduled_func()
 
                 # Verify find_japanese_sentence called directly (synchronously)
-                mock_find.assert_called_with('test_word', 'eng')
+                mock_find.assert_called_with('test_word', 'eng', max_results=30)
 
                 # Verify logic ran (check note update)
                 self.assertEqual(editor.note.fields[0], 'JP1')
