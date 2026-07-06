@@ -72,7 +72,7 @@ def tokenize_japanese(text: str) -> list[str]:
     """
     return list(dict.fromkeys(_TOKEN_RE.findall(text)))
 
-def build_sqlite_index(pairs_tsv_path: str, db_path: str, audio_ids: set[str] | None = None) -> int:
+def build_sqlite_index(pairs_tsv_path: str, db_path: str, audio_ids: "set[str] | None" = None) -> int:
     """
     Build a SQLite index database from a pairs TSV file.
 
