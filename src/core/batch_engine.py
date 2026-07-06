@@ -335,7 +335,7 @@ def run_batch(
     deck_id: int,
     lang_label: str,
     source_field: str,
-    dest_field_pairs: list[tuple[str, str, str | None]],
+    dest_field_pairs: "list[tuple[str, str, str | None]]",
     skip_existing: bool = True,
     undo_name: "str | None" = None,
 ) -> BatchResult:
