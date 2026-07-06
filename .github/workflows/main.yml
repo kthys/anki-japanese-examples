@@ -22,7 +22,7 @@ jobs:
 
       - name: Build .ankiaddon file
         run: |
-          zip -r japanese-examples-${{ env.VERSION }}.ankiaddon * -x "*.git*" "*.github*" ".gitignore" "README.md" "screenshots/*" "*__pycache__*" "*.pyc" "*.DS_Store" "tests/*"
+          zip -r japanese-examples-${{ env.VERSION }}.ankiaddon * -x "*.git*" "*.github*" ".gitignore" "README.md" "screenshots/*" "*__pycache__*" "*.pyc" "*.DS_Store" "tests/*" "requirements-dev.txt"
 
       - name: Create Release
         id: create_release

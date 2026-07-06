@@ -13,7 +13,7 @@ class SimpleTranslator:
         self.load_translations()
 
     def load_translations(self):
-        locale_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'locale')
+        locale_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'locale')
 
         # Always load English first as base
         en_path = os.path.join(locale_dir, 'en.json')

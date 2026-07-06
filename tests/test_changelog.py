@@ -30,9 +30,9 @@ class TestChangelog(unittest.TestCase):
         self.mock_aqt.mw = self.mock_mw
 
         # Import the module under test
-        if 'changelog' in sys.modules:
-            del sys.modules['changelog']
-        import changelog
+        if 'src.utils.changelog' in sys.modules:
+            del sys.modules['src.utils.changelog']
+        import src.utils.changelog as changelog
         self.changelog = changelog
 
     def tearDown(self):
