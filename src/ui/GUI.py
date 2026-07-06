@@ -6,9 +6,9 @@ import os, html, logging
 logger = logging.getLogger(__name__)
 
 try:
-    from ..core.japanese_examples import find_japanese_sentence, DST_FIELD_TRANSLATION, DST_FIELD_JAP
+    from ..core.japanese_examples import find_japanese_sentence
 except ImportError:
-    from src.core.japanese_examples import find_japanese_sentence, DST_FIELD_TRANSLATION, DST_FIELD_JAP
+    from src.core.japanese_examples import find_japanese_sentence
 
 try:
     from ..core.audio_fetcher import fetch_audio_to_temp, register_audio_file

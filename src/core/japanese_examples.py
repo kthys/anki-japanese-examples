@@ -1,6 +1,5 @@
 import requests
 import logging
-from aqt import mw
 
 # Use a global session for connection pooling to improve performance
 _session = requests.Session()
@@ -16,26 +15,11 @@ except ImportError:
 #  Logging setup
 logger = logging.getLogger(__name__)
 
-#  Fetch config
-config = mw.addonManager.getConfig(__name__)
-
-if not isinstance(config, dict) or "japaneseDstField" not in config or "translationDstField" not in config:
-    logger.warning("Configuration is missing or invalid.")
-    try:
-        from aqt.utils import showWarning
-        showWarning(
-            "Japanese Examples add-on:\n\n"
-            "Configuration is missing or invalid.\n"
-            "Please check the add-on configuration.\n"
-            "Using default fields ('ExampleJapanese' and 'ExampleTranslated')."
-        )
-    except Exception as e:
-        logger.error(f"Could not show warning dialog: {e}")
-        
-    config = config if isinstance(config, dict) else {}
-
-DST_FIELD_JAP = config.get("japaneseDstField", "ExampleJapanese")
-DST_FIELD_TRANSLATION = config.get("translationDstField", "ExampleTranslated")
+# NOTE: destination field names are deliberately NOT read here. The config is
+# re-read at use time (see GUI.py's add flow), so settings changes apply
+# without restarting Anki, and importing this module has no side effects —
+# no collection access, no dialogs. Missing-field errors are reported
+# contextually at use time via the localized "no_valid_dst_fields" message.
 
 #############################################
 

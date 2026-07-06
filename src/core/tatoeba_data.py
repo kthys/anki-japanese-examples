@@ -82,6 +82,10 @@ def build_sqlite_index(pairs_tsv_path: str, db_path: str, audio_ids: set[str] | 
 
     An index is created on ``words(word)`` to enable efficient exact-match queries.
 
+    The build is atomic: rows are written to ``db_path + ".tmp"`` and moved
+    onto ``db_path`` only after the final commit, so ``db_path`` always holds
+    either the previous complete index or the new one — never a partial file.
+
     Args:
     - pairs_tsv_path (str): Path to the TSV file produced by build_pairs_tsv().
     - db_path (str): Path where the SQLite database will be created (overwritten if exists).
@@ -89,31 +93,58 @@ def build_sqlite_index(pairs_tsv_path: str, db_path: str, audio_ids: set[str] | 
     Returns:
     - The number of sentences inserted into the database.
     """
-    if os.path.exists(db_path):
-        os.remove(db_path)
+    tmp_db_path = db_path + ".tmp"
+    if os.path.exists(tmp_db_path):
+        os.remove(tmp_db_path)
 
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE sentences (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            jpn_id TEXT,
-            jpn_text TEXT,
-            trans_id TEXT,
-            trans_text TEXT,
-            has_audio INTEGER DEFAULT 0
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE words (
-            word TEXT,
-            sentence_id INTEGER,
-            FOREIGN KEY (sentence_id) REFERENCES sentences(id)
-        )
-    """)
-
+    conn = sqlite3.connect(tmp_db_path)
     count = 0
     try:
+        cur = conn.cursor()
+        # The temp file is discarded on any failure, so crash-safety pragmas
+        # buy nothing here — trade them for a much faster bulk load.
+        cur.execute("PRAGMA synchronous = OFF")
+        cur.execute("PRAGMA journal_mode = MEMORY")
+        cur.execute("""
+            CREATE TABLE sentences (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                jpn_id TEXT,
+                jpn_text TEXT,
+                trans_id TEXT,
+                trans_text TEXT,
+                has_audio INTEGER DEFAULT 0
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE words (
+                word TEXT,
+                sentence_id INTEGER,
+                FOREIGN KEY (sentence_id) REFERENCES sentences(id)
+            )
+        """)
+
+        # Accumulate rows and flush in chunks with executemany — sentence ids
+        # are assigned explicitly so word rows can reference them without a
+        # per-row lastrowid round trip.
+        CHUNK_SIZE = 1000
+        sentence_rows: list[tuple] = []
+        word_rows: list[tuple] = []
+
+        def flush():
+            if sentence_rows:
+                cur.executemany(
+                    "INSERT INTO sentences (id, jpn_id, jpn_text, trans_id, trans_text, has_audio) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    sentence_rows,
+                )
+                sentence_rows.clear()
+            if word_rows:
+                cur.executemany(
+                    "INSERT INTO words (word, sentence_id) VALUES (?, ?)",
+                    word_rows,
+                )
+                word_rows.clear()
+
         with open(pairs_tsv_path, "r", encoding="utf-8") as f:
             for line in f:
                 parts = line.strip().split("\t")
@@ -121,26 +152,33 @@ def build_sqlite_index(pairs_tsv_path: str, db_path: str, audio_ids: set[str] | 
                     continue
                 jpn_id, jpn_text, trans_id, trans_text = parts[0], parts[1], parts[2], parts[3]
                 has_audio_val = 1 if audio_ids and jpn_id in audio_ids else 0
-                cur.execute(
-                    "INSERT INTO sentences (jpn_id, jpn_text, trans_id, trans_text, has_audio) VALUES (?, ?, ?, ?, ?)",
-                    (jpn_id, jpn_text, trans_id, trans_text, has_audio_val)
-                )
-                sentence_id = cur.lastrowid
-                tokens = tokenize_japanese(jpn_text)
-                for token in tokens:
-                    cur.execute(
-                        "INSERT INTO words (word, sentence_id) VALUES (?, ?)",
-                        (token, sentence_id)
-                    )
                 count += 1
+                sentence_id = count
+                sentence_rows.append(
+                    (sentence_id, jpn_id, jpn_text, trans_id, trans_text, has_audio_val))
+                word_rows.extend(
+                    (token, sentence_id) for token in tokenize_japanese(jpn_text))
+                if len(sentence_rows) >= CHUNK_SIZE:
+                    flush()
+        flush()
+
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_words_word ON words(word)")
+        conn.commit()
+        conn.close()
+        conn = None
+        # Atomic swap: same directory, so os.replace is a single rename.
+        os.replace(tmp_db_path, db_path)
     except Exception as e:
         logging.error(f"Error building SQLite index: {e}", exc_info=True)
-        conn.close()
         raise
-
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_words_word ON words(word)")
-    conn.commit()
-    conn.close()
+    finally:
+        if conn is not None:
+            conn.close()
+        if os.path.exists(tmp_db_path):
+            try:
+                os.remove(tmp_db_path)
+            except OSError:
+                logging.warning(f"Could not remove temp index {tmp_db_path}")
     return count
 
 def search_word(db_path: str, word: str, conn: Optional[sqlite3.Connection] = None) -> list[tuple[str, str, str, int]]:

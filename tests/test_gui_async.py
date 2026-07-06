@@ -52,9 +52,6 @@ class TestGUIAsync(unittest.TestCase):
 
         # Also need to mock japanese_examples because GUI imports from it
         self.mock_japanese_examples = MagicMock()
-        # Set constants to match the field names we will use in the test
-        self.mock_japanese_examples.DST_FIELD_JAP = 'Expression'
-        self.mock_japanese_examples.DST_FIELD_TRANSLATION = 'Meaning'
         sys.modules['src.core.japanese_examples'] = self.mock_japanese_examples
 
         # Import the module under test
@@ -133,8 +130,8 @@ class TestGUIAsync(unittest.TestCase):
         self.assertEqual(args2[0], _('select_sentence_dialog'))
 
         # Verify note update
-        # DST_FIELD_JAP is 'Expression' (index 0)
-        # DST_FIELD_TRANSLATION is 'Meaning' (index 1)
+        # japaneseDstField is 'Expression' (index 0)
+        # translationDstField is 'Meaning' (index 1)
         self.assertEqual(editor.note.fields[0], 'JP1')
         self.assertEqual(editor.note.fields[1], 'TR1')
 
@@ -268,8 +265,6 @@ class TestGUIAudioField(unittest.TestCase):
         self.mock_utils.Qt.__module__ = 'PyQt5.QtCore'
 
         self.mock_japanese_examples = MagicMock()
-        self.mock_japanese_examples.DST_FIELD_JAP = 'Expression'
-        self.mock_japanese_examples.DST_FIELD_TRANSLATION = 'Meaning'
         sys.modules['src.core.japanese_examples'] = self.mock_japanese_examples
 
         # Mock audio_fetcher module at the boundary
