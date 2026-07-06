@@ -12,8 +12,12 @@ Japanese Examples is a plugin for the Anki flashcard software that adds example 
 
 ## Features
 
-- **Interactive Single-Card Addition**: Find and select the perfect example sentence while editing a single flashcard.
+- **Interactive Single-Card Addition**: Find and select the perfect example sentence while editing a single flashcard. Sentences with a native-speaker recording are marked with 🔊 in the picker.
 - **High-Performance Batch Addition**: Automatically add example sentences to an entire deck of cards at once. The plugin downloads and indexes Tatoeba's database locally using SQLite, enabling incredibly fast bulk processing.
+- **Native-Speaker Audio**: Example sentences can come with their native-speaker recordings from Tatoeba, in both manual and batch mode. Sentences with audio are preferred, and recordings are saved into a field of your choice. Downloads run in the background with a progress counter, so Anki stays responsive.
+- **Multiple Field Pairs**: Batch mode can fill up to 3 example/translation field pairs per card, and decks mixing several note types offer all their fields in the dialog.
+- **Deck and Subdeck Selection**: Process a whole deck tree or a single subdeck, with a confirmation before processing an entire tree.
+- **Undoable Batch Runs**: Press Ctrl+Z to revert added examples and audio after a batch run, and get a report of the results, including any audio errors.
 - **Always Up-to-Date**: For single additions, the plugin connects directly to the Tatoeba API to ensure you have the latest available examples.
 - **Multilingual UI**: The plugin interface and menus are automatically translated into French or English based on your Anki language settings.
 
@@ -34,7 +38,7 @@ Japanese Examples is a plugin for the Anki flashcard software that adds example 
 ### Initial Setup
 
 1. Open the plugin's configuration in the addon manager.
-2. Define the names of the fields used for your Japanese examples and translated examples.
+2. Define the names of the fields used for your Japanese examples, translated examples, and audio recordings.
 3. Restart Anki to apply these settings.
 
 ### Adding Examples Manually
@@ -47,9 +51,10 @@ Japanese Examples is a plugin for the Anki flashcard software that adds example 
 
 1. In the main Anki window, go to **Tools > Batch process examples**.
 2. In the "**Data Management**" section, choose your target language (English or French) and click **Download data**. Wait for the progress to complete.
-3. In the "**Execution**" section, select your target Deck and map the Source field (containing your lookup word), the Japanese example field, and the Translated example field.
-4. Check "Skip cards with existing examples" if you only want to process empty cards.
-5. Click **Run batch process** and let the engine populate your deck!
+3. In the "**Execution**" section, select your target Deck — you can process a whole deck tree (including its subdecks) or narrow it down to a single subdeck.
+4. Map the Source field (containing your lookup word), then the Japanese example, Translated example, and Audio fields. You can add up to 3 example/translation field pairs to fill several examples per card.
+5. Check "Skip cards with existing examples" if you only want to process empty cards.
+6. Click **Run batch process** and let the engine populate your deck! A report shows the results when it finishes, including audio downloads, and you can press **Ctrl+Z** to undo the whole run.
 
 ## License
 
