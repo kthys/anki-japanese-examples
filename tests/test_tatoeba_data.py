@@ -196,7 +196,52 @@ class TestTatoebaData(unittest.TestCase):
         results = tatoeba_data.search_word(db_path, "好")
         self.assertEqual(len(results), 2)
 
+        # No temp build file may remain after a successful build
+        self.assertFalse(os.path.exists(db_path + ".tmp"))
+
         # Clean up db
+        os.remove(db_path)
+
+    def test_build_sqlite_index_failure_preserves_previous_db(self):
+        """A failed rebuild must leave the previous complete index untouched
+        and not leave a partial .tmp file behind."""
+        tsv_path = os.path.join(self.temp_dir, "atomic_pairs.tsv")
+        db_path = os.path.join(self.temp_dir, "atomic_index.db")
+
+        with open(tsv_path, "w", encoding="utf-8") as f:
+            f.write("1\t猫が好きです。\t100\tI like cats.\n")
+        tatoeba_data.build_sqlite_index(tsv_path, db_path)
+
+        # Rebuild from a missing TSV — must raise, old index must survive
+        with self.assertRaises(Exception):
+            tatoeba_data.build_sqlite_index(
+                os.path.join(self.temp_dir, "does_not_exist.tsv"), db_path)
+
+        self.assertFalse(os.path.exists(db_path + ".tmp"))
+        results = tatoeba_data.search_word(db_path, "猫")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0][1], "猫が好きです。")
+
+        os.remove(db_path)
+
+    def test_build_sqlite_index_rebuild_replaces_old_content(self):
+        """Rebuilding onto an existing db must fully replace its contents."""
+        tsv_path = os.path.join(self.temp_dir, "rebuild_pairs.tsv")
+        db_path = os.path.join(self.temp_dir, "rebuild_index.db")
+
+        with open(tsv_path, "w", encoding="utf-8") as f:
+            f.write("1\t猫が好きです。\t100\tI like cats.\n")
+        tatoeba_data.build_sqlite_index(tsv_path, db_path)
+
+        with open(tsv_path, "w", encoding="utf-8") as f:
+            f.write("2\t犬が好きです。\t101\tI like dogs.\n")
+        count = tatoeba_data.build_sqlite_index(tsv_path, db_path)
+
+        self.assertEqual(count, 1)
+        self.assertEqual(tatoeba_data.search_word(db_path, "猫"), [])
+        results = tatoeba_data.search_word(db_path, "犬")
+        self.assertEqual(len(results), 1)
+
         os.remove(db_path)
 
     def test_search_word_strict_boundaries(self):
