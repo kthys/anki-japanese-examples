@@ -207,6 +207,42 @@ class TestConfigUI(unittest.TestCase):
         dialog.save_config()
         self.assertEqual(dialog.config["maxSentenceOptions"], 60)
 
+    # ── test connection ────────────────────────────────────────────
+
+    def test_test_connection_button_present(self):
+        """Config dialog should have a Test Connection button wired to test_connection."""
+        dialog = self.config_ui.ConfigDialog()
+        calls = self.mock_utils.QPushButton.return_value.clicked.connect.call_args_list
+        self.assertTrue(
+            any(c[0][0] == dialog.test_connection for c in calls),
+            "Test Connection button is not wired to dialog.test_connection",
+        )
+
+    def test_test_connection_success_shows_info(self):
+        """test_connection should show a success info dialog on success."""
+        dialog = self.config_ui.ConfigDialog()
+        with patch('src.ui.config_ui.test_tatoeba_connection',
+                   return_value=(True, "ok")) as mock_test:
+            dialog.test_connection()
+        mock_test.assert_called_once()
+        self.mock_utils.showInfo.assert_called_with("ok")
+
+    def test_test_connection_failure_shows_warning(self):
+        """test_connection should show a warning dialog on failure."""
+        dialog = self.config_ui.ConfigDialog()
+        with patch('src.ui.config_ui.test_tatoeba_connection',
+                   return_value=(False, "boom")) as mock_test:
+            dialog.test_connection()
+        mock_test.assert_called_once()
+        self.mock_utils.showWarning.assert_called_with("boom")
+
+    def test_test_connection_unavailable_shows_warning(self):
+        """test_connection should warn without crashing when the module is unavailable."""
+        dialog = self.config_ui.ConfigDialog()
+        with patch('src.ui.config_ui.test_tatoeba_connection', None):
+            dialog.test_connection()
+        self.mock_utils.showWarning.assert_called_once()
+
 
 if __name__ == '__main__':
     unittest.main()

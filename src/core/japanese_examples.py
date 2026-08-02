@@ -100,6 +100,33 @@ def _fetch_sentences(base_params, max_results, exclude_ids=None):
     return sentences
 
 
+def test_tatoeba_connection() -> tuple:
+    """
+    Ping the Tatoeba search API with a minimal request.
+
+    Used by the config dialog's "Test connection" button (CONF-01). A plain
+    reachability check of the API host would not be enough: the request must
+    also return valid JSON so a proxy error page or a changed endpoint is
+    reported as a failure.
+
+    Returns:
+    - A (success, message) tuple. message is a localized user-facing string
+      (see ``test_connection_success`` / ``test_connection_failed`` keys).
+    """
+    try:
+        response = _session.get(
+            _API_URL,
+            params={"query": "猫", "limit": 1, "page": 1},
+            timeout=10,
+        )
+        response.raise_for_status()
+        response.json()
+    except (requests.exceptions.RequestException, ValueError) as exc:
+        logger.warning("Tatoeba connection test failed: %s", exc)
+        return False, _("test_connection_failed").format(error=str(exc))
+    return True, _("test_connection_success")
+
+
 def find_japanese_sentence(word, translation_language='eng', max_results=50):
     """
     Find Japanese sentences containing a given word using the Tatoeba API.

@@ -143,22 +143,6 @@ class TestTatoebaData(unittest.TestCase):
         self.assertFalse(success)
         self.assertIn("Connection", msg)
 
-    def test_load_index_builds_dict(self):
-        file_path = tatoeba_data.get_data_file_path("eng")
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write("1\t猫が好き\t100\tI like cats\n1\t猫が好き\t101\tI really like cats\n")
-            
-        index = tatoeba_data.load_index("eng")
-        self.assertIsNotNone(index)
-        self.assertIn("猫が好き", index)
-        self.assertEqual(len(index["猫が好き"]), 2)
-        self.assertEqual(index["猫が好き"][0], ("猫が好き", "I like cats"))
-        self.assertEqual(index["猫が好き"][1], ("猫が好き", "I really like cats"))
-
-    def test_load_index_missing_file(self):
-        index = tatoeba_data.load_index("fra")
-        self.assertIsNone(index)
-
     def test_is_data_available_true(self):
         file_path = tatoeba_data.get_data_file_path("eng")
         with open(file_path, "w", encoding="utf-8") as f:

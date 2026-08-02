@@ -1,11 +1,29 @@
 from aqt import mw
-from aqt.utils import QDialog, QVBoxLayout, QPushButton, QFormLayout, QDialogButtonBox, showInfo
+from aqt.utils import QDialog, QVBoxLayout, QPushButton, QFormLayout, QDialogButtonBox, showInfo, showWarning
 from aqt.qt import QLineEdit, QSpinBox
 
 try:
     from ..utils.i18n import _
 except ImportError:
     from src.utils.i18n import _
+
+try:
+    from ..core.japanese_examples import test_tatoeba_connection
+except ImportError:
+    try:
+        from src.core.japanese_examples import test_tatoeba_connection
+    except ImportError:
+        test_tatoeba_connection = None
+
+# Try to import QueryOp for background operations (Anki 2.1.50+)
+try:
+    from aqt.operations import QueryOp
+except ImportError:
+    QueryOp = None
+
+# Global set to keep references to active operations to prevent premature
+# garbage collection (same pattern as GUI.py / batch_ui.py)
+_active_ops = set()
 
 class ConfigDialog(QDialog):
     def __init__(self, parent=None):
@@ -50,6 +68,11 @@ class ConfigDialog(QDialog):
 
         layout.addLayout(form_layout)
 
+        # Test connection button — pings the Tatoeba API and reports the result
+        test_btn = QPushButton(_("test_connection_button"))
+        test_btn.clicked.connect(self.test_connection)
+        layout.addWidget(test_btn)
+
         # Reset Deck Preferences Button
         reset_btn = QPushButton(_("reset_deck_preferences"))
         reset_btn.clicked.connect(self.reset_preferences)
@@ -60,6 +83,49 @@ class ConfigDialog(QDialog):
         buttons.accepted.connect(self.save_config)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def test_connection(self):
+        """
+        Ping the Tatoeba API in the background and show the result.
+
+        Runs the network request in a QueryOp (Anki 2.1.50+) so the dialog
+        never blocks; falls back to a blocking call on older Anki versions.
+        Success and failure are both reported with a visible dialog.
+        """
+        if test_tatoeba_connection is None:
+            showWarning(_("test_connection_failed").format(error="module unavailable"))
+            return
+
+        op = None
+
+        def on_success(result):
+            if op:
+                _active_ops.discard(op)
+            success, message = result
+            if success:
+                showInfo(message)
+            else:
+                showWarning(message)
+
+        def on_failure(exc):
+            if op:
+                _active_ops.discard(op)
+            showWarning(_("test_connection_failed").format(error=str(exc)))
+
+        if QueryOp:
+            op = QueryOp(
+                parent=self,
+                op=lambda col: test_tatoeba_connection(),
+                success=on_success,
+            ).failure(on_failure)
+            _active_ops.add(op)
+            op.run_in_background()
+        else:
+            # Fallback for older Anki: blocking call, as before
+            try:
+                on_success(test_tatoeba_connection())
+            except Exception as exc:
+                on_failure(exc)
 
     def reset_preferences(self):
         if not self.config:

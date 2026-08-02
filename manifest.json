@@ -7,6 +7,8 @@
     "minAnkiVersion": "2.1.0",
     "files": [
         "__init__.py",
+        "LICENSE",
+        "manifest.json",
         "src/__init__.py",
         "src/core/__init__.py",
         "src/core/japanese_examples.py",

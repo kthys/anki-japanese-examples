@@ -438,44 +438,6 @@ def download_tatoeba_data(lang_code: str, progress_callback=None) -> tuple[bool,
         logging.error(f"Error downloading Tatoeba data: {e}", exc_info=True)
         return False, error_msg
 
-def load_index(lang_code: str) -> Optional[dict]:
-    """
-    Loads the processed TSV into an in-memory dict.
-
-    .. deprecated::
-        Use :func:`search_word` with the SQLite index instead.
-        Kept for backward compatibility.
-
-    Args:
-    - lang_code (str): The ISO 639-3 language code to load the index for.
-
-    Returns:
-    - A dictionary containing the loaded index, or None if the file does not exist.
-    """
-    if not is_supported(lang_code):
-        return None
-        
-    file_path = get_data_file_path(lang_code)
-    
-    if not os.path.exists(file_path):
-        return None
-        
-    index = {}
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            for line in f:
-                parts = line.strip().split("\t")
-                if len(parts) >= 4:
-                    jpn_text = parts[1]
-                    trans_text = parts[3]
-                    if jpn_text not in index:
-                        index[jpn_text] = []
-                    index[jpn_text].append((jpn_text, trans_text))
-        return index
-    except Exception as e:
-        logging.error(f"Error loading index: {e}", exc_info=True)
-        return None
-
 def get_file_status(lang_code: str) -> Optional[str]:
     """
     Returns the download date string from metadata.

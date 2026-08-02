@@ -81,5 +81,57 @@ class TestJapaneseExamplesExceptions(unittest.TestCase):
         self.assertIn('timeout', kwargs, "Timeout parameter missing in session.get call")
         self.assertEqual(kwargs['timeout'], 10, "Timeout should be 10 seconds")
 
+    # ── test_tatoeba_connection ────────────────────────────────────
+
+    def _mock_ok_response(self):
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {"results": []}
+        self.mock_session.get.side_effect = None
+        self.mock_session.get.return_value = mock_response
+        return mock_response
+
+    def test_tatoeba_connection_success(self):
+        """test_tatoeba_connection should report success on a reachable API."""
+        self._mock_ok_response()
+        success, msg = self.japanese_examples.test_tatoeba_connection()
+        self.assertTrue(success)
+        self.assertIn("reachable", msg)
+        # A minimal real search is sent with a short timeout
+        _, kwargs = self.mock_session.get.call_args
+        self.assertEqual(kwargs["params"]["query"], "猫")
+        self.assertEqual(kwargs["timeout"], 10)
+
+    def test_tatoeba_connection_request_exception(self):
+        """test_tatoeba_connection should report failure on a network error."""
+        RequestException = self.mock_requests.exceptions.RequestException
+        self.mock_session.get.side_effect = RequestException("Network error")
+        success, msg = self.japanese_examples.test_tatoeba_connection()
+        self.assertFalse(success)
+        self.assertIn("Network error", msg)
+
+    def test_tatoeba_connection_invalid_json(self):
+        """test_tatoeba_connection should report failure when the response is not JSON."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.side_effect = ValueError("bad json")
+        self.mock_session.get.side_effect = None
+        self.mock_session.get.return_value = mock_response
+        success, msg = self.japanese_examples.test_tatoeba_connection()
+        self.assertFalse(success)
+        self.assertIn("bad json", msg)
+
+    def test_tatoeba_connection_http_error(self):
+        """test_tatoeba_connection should report failure on a non-200 response."""
+        RequestException = self.mock_requests.exceptions.RequestException
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = RequestException("500 Server Error")
+        self.mock_session.get.side_effect = None
+        self.mock_session.get.return_value = mock_response
+        success, msg = self.japanese_examples.test_tatoeba_connection()
+        self.assertFalse(success)
+        self.assertIn("500 Server Error", msg)
+
+
 if __name__ == '__main__':
     unittest.main()
