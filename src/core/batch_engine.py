@@ -12,6 +12,14 @@ except ImportError:
     import tatoeba_data
 
 try:
+    from . import languages
+except ImportError:
+    try:
+        import languages
+    except ImportError:
+        languages = None  # type: ignore
+
+try:
     from . import audio_fetcher
     from .audio_fetcher import AudioDownloadError
 except ImportError:
@@ -333,7 +341,7 @@ def process_pending_audio(result: BatchResult, col) -> None:
 def run_batch(
     col,
     deck_id: int,
-    lang_label: str,
+    lang_code: str,
     source_field: str,
     dest_field_pairs: "list[tuple[str, str, str | None]]",
     skip_existing: bool = True,
@@ -351,7 +359,7 @@ def run_batch(
     - col: The Anki collection object (``mw.col``).
     - deck_id (int): The ID of the deck to process. The deck's subdecks are
       included (see build_deck_search).
-    - lang_label (str): Language label for Tatoeba data (e.g. 'English', 'French').
+    - lang_code (str): ISO 639-3 language code for Tatoeba data (e.g. 'eng', 'spa').
     - source_field (str): Name of the note field containing the word to search.
     - dest_field_pairs (list[tuple[str, str, str | None]]): List of triples of (Japanese,
       Translation, Audio) destination field names. The audio element is the destination field name
@@ -376,10 +384,9 @@ def run_batch(
     if not dest_field_pairs:
         return result
 
-    # Resolve language code and database path
-    lang_code = tatoeba_data.LANG_MAP.get(lang_label)
-    if not lang_code:
-        logger.error(f"Unknown language label: {lang_label}")
+    # Resolve the language and database path
+    if languages is None or not languages.is_supported(lang_code):
+        logger.error(f"Unknown language code: {lang_code}")
         return result
 
     db_path = tatoeba_data.get_db_path(lang_code)

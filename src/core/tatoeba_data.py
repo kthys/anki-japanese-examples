@@ -23,9 +23,17 @@ except ImportError:
     except Exception:
         _ = lambda x: x
 
+try:
+    from ..core.languages import is_supported, get_localized_name
+except ImportError:
+    try:
+        from src.core.languages import is_supported, get_localized_name
+    except Exception:
+        is_supported = lambda code: code in ("eng", "fra")
+        get_localized_name = lambda code: code
+
 TATOEBA_BASE_URL = "https://downloads.tatoeba.org/exports/per_language"
 AUDIO_INDEX_URL = "https://downloads.tatoeba.org/exports/sentences_with_audio.tar.bz2"
-LANG_MAP = {"English": "eng", "French": "fra"}
 USER_FILES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "user_files")
 METADATA_FILE = os.path.join(USER_FILES_DIR, "metadata.json")
 
@@ -341,21 +349,21 @@ def build_pairs_tsv(jpn_sentences_tsv: str, target_sentences_tsv: str, links_tsv
         return ""
     return "\n".join(output_lines) + "\n"
 
-def download_tatoeba_data(lang_label: str, progress_callback=None) -> tuple[bool, str]:
+def download_tatoeba_data(lang_code: str, progress_callback=None) -> tuple[bool, str]:
     """
     Main entry point to download data for a given language.
 
     Args:
-    - lang_label (str): The language label (e.g. 'English', 'French') to download data for.
+    - lang_code (str): The ISO 639-3 language code (e.g. 'eng', 'spa') to download data for.
     - progress_callback (callable, optional): A callback function to receive progress updates.
 
     Returns:
     - A tuple containing a boolean success flag and a status message string.
     """
-    if lang_label not in LANG_MAP:
-        return False, f"Unknown language: {lang_label}"
-    
-    lang_code = LANG_MAP[lang_label]
+    if not is_supported(lang_code):
+        return False, f"Unknown language: {lang_code}"
+
+    lang_label = get_localized_name(lang_code)
     
     try:
         os.makedirs(USER_FILES_DIR, exist_ok=True)
@@ -430,7 +438,7 @@ def download_tatoeba_data(lang_label: str, progress_callback=None) -> tuple[bool
         logging.error(f"Error downloading Tatoeba data: {e}", exc_info=True)
         return False, error_msg
 
-def load_index(lang_label: str) -> Optional[dict]:
+def load_index(lang_code: str) -> Optional[dict]:
     """
     Loads the processed TSV into an in-memory dict.
 
@@ -439,15 +447,14 @@ def load_index(lang_label: str) -> Optional[dict]:
         Kept for backward compatibility.
 
     Args:
-    - lang_label (str): The language label to load the index for.
+    - lang_code (str): The ISO 639-3 language code to load the index for.
 
     Returns:
     - A dictionary containing the loaded index, or None if the file does not exist.
     """
-    if lang_label not in LANG_MAP:
+    if not is_supported(lang_code):
         return None
         
-    lang_code = LANG_MAP[lang_label]
     file_path = get_data_file_path(lang_code)
     
     if not os.path.exists(file_path):
@@ -469,20 +476,19 @@ def load_index(lang_label: str) -> Optional[dict]:
         logging.error(f"Error loading index: {e}", exc_info=True)
         return None
 
-def get_file_status(lang_label: str) -> Optional[str]:
+def get_file_status(lang_code: str) -> Optional[str]:
     """
     Returns the download date string from metadata.
 
     Args:
-    - lang_label (str): The language label to get the status for.
+    - lang_code (str): The ISO 639-3 language code to get the status for.
 
     Returns:
     - A string representing the download date, or None if the metadata is not available.
     """
-    if lang_label not in LANG_MAP:
+    if not is_supported(lang_code):
         return None
         
-    lang_code = LANG_MAP[lang_label]
     if os.path.exists(METADATA_FILE):
         try:
             with open(METADATA_FILE, "r", encoding="utf-8") as f:
@@ -493,19 +499,18 @@ def get_file_status(lang_label: str) -> Optional[str]:
             pass
     return None
 
-def is_data_available(lang_label: str) -> bool:
+def is_data_available(lang_code: str) -> bool:
     """
     Returns True if the data file exists.
 
     Args:
-    - lang_label (str): The language label to check for data availability.
+    - lang_code (str): The ISO 639-3 language code to check for data availability.
 
     Returns:
     - A boolean indicating whether the processed data file exists.
     """
-    if lang_label not in LANG_MAP:
+    if not is_supported(lang_code):
         return False
         
-    lang_code = LANG_MAP[lang_label]
     file_path = get_data_file_path(lang_code)
     return os.path.exists(file_path)

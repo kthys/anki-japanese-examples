@@ -43,6 +43,50 @@ class TestI18n(unittest.TestCase):
         import src.utils.i18n as i18n
         self.assertEqual(i18n.get_current_language(), 'en')
 
+    def test_all_locale_files_cover_english_key_set(self):
+        """es/zh/ko locale files must contain every key from the English base file.
+
+        Enforces the "full key set" requirement for each UI language (I18N-01/02/03)
+        and protects against key drift between locale files.
+        """
+        import json
+        import os
+        locale_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'locale')
+        with open(os.path.join(locale_dir, 'en.json'), encoding='utf-8') as f:
+            en_keys = set(json.load(f).keys())
+        for lang in ('es', 'zh', 'ko'):
+            with self.subTest(lang=lang):
+                path = os.path.join(locale_dir, f'{lang}.json')
+                self.assertTrue(os.path.exists(path), f"{lang}.json is missing")
+                with open(path, encoding='utf-8') as f:
+                    keys = set(json.load(f).keys())
+                self.assertEqual(en_keys - keys, set(), f"Missing keys in {lang}.json")
+                self.assertEqual(keys - en_keys, set(), f"Unexpected extra keys in {lang}.json")
+
+    def test_zh_locale_serves_zh_cn_and_zh_tw(self):
+        """zh.json must be loaded for both zh_CN and zh_TW via the locale overlay."""
+        import src.utils.i18n as i18n_mod
+        for lang in ('zh_CN', 'zh_TW'):
+            with self.subTest(lang=lang):
+                translator = i18n_mod.SimpleTranslator(lang)
+                self.assertEqual(translator.gettext('language_name_cmn'), '中文（简体）')
+
+    def test_language_name_keys_localized_in_each_ui_language(self):
+        """Every UI locale must localize the 5 registry display-name keys."""
+        import json
+        import os
+        locale_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'locale')
+        name_keys = ['language_name_eng', 'language_name_fra', 'language_name_spa',
+                     'language_name_cmn', 'language_name_kor']
+        for lang in ('en', 'fr', 'es', 'zh', 'ko'):
+            with self.subTest(lang=lang):
+                with open(os.path.join(locale_dir, f'{lang}.json'), encoding='utf-8') as f:
+                    data = json.load(f)
+                for key in name_keys:
+                    self.assertIn(key, data)
+                    self.assertNotEqual(data[key], key, f"{key} untranslated in {lang}.json")
+
+
     def test_simple_translator_load_translations_en(self):
         """Test that SimpleTranslator loads English translations."""
         import src.utils.i18n as i18n

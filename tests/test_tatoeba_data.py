@@ -36,11 +36,14 @@ class TestTatoebaData(unittest.TestCase):
         tatoeba_data.USER_FILES_DIR = self.original_user_files_dir
         tatoeba_data.METADATA_FILE = self.original_metadata_file
 
-    def test_lang_map_contains_english_and_french(self):
-        self.assertIn("English", tatoeba_data.LANG_MAP)
-        self.assertIn("French", tatoeba_data.LANG_MAP)
-        self.assertEqual(tatoeba_data.LANG_MAP["English"], "eng")
-        self.assertEqual(tatoeba_data.LANG_MAP["French"], "fra")
+    def test_registry_supports_all_five_languages(self):
+        """The language registry covers all 5 supported languages with correct codes."""
+        for code in ("eng", "fra", "spa", "cmn", "kor"):
+            self.assertTrue(tatoeba_data.is_supported(code))
+        self.assertFalse(tatoeba_data.is_supported("klingon"))
+        self.assertEqual(tatoeba_data.get_localized_name("spa"), "Spanish")
+        self.assertEqual(tatoeba_data.get_localized_name("cmn"), "Chinese (Simplified)")
+        self.assertEqual(tatoeba_data.get_localized_name("kor"), "Korean")
 
     def test_get_download_urls_english(self):
         urls = tatoeba_data.get_download_urls("eng")
@@ -87,7 +90,7 @@ class TestTatoebaData(unittest.TestCase):
         mock_get.return_value = mock_response
 
         with patch('src.core.tatoeba_data.build_pairs_tsv', return_value="1\t猫\t100\tcat\n"):
-            success, msg = tatoeba_data.download_tatoeba_data("English")
+            success, msg = tatoeba_data.download_tatoeba_data("eng")
             self.assertTrue(success)
             self.assertIn("1", msg) # The count should be 1
             
@@ -104,11 +107,39 @@ class TestTatoebaData(unittest.TestCase):
                 self.assertIn("eng", md)
                 self.assertEqual(md["eng"]["count"], 1)
 
+    @patch('src.core.tatoeba_data.download_audio_ids', return_value=set())
+    @patch('src.core.tatoeba_data.requests.get')
+    def test_download_tatoeba_data_spanish(self, mock_get, mock_audio_ids):
+        """download_tatoeba_data works for a new language (Spanish)."""
+        mock_response = MagicMock()
+        mock_response.content = bz2.compress(b"mock tsv content")
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        with patch('src.core.tatoeba_data.build_pairs_tsv', return_value="1\t猫\t100\tgato\n"):
+            success, msg = tatoeba_data.download_tatoeba_data("spa")
+            self.assertTrue(success)
+            self.assertIn("1", msg)  # The count should be 1
+
+            # Verify Spanish data + metadata were written under the spa code
+            file_path = tatoeba_data.get_data_file_path("spa")
+            self.assertTrue(os.path.exists(file_path))
+            with open(tatoeba_data.METADATA_FILE, "r", encoding="utf-8") as f:
+                md = json.load(f)
+                self.assertIn("spa", md)
+                self.assertEqual(md["spa"]["count"], 1)
+
+    def test_download_tatoeba_data_unknown_language(self):
+        """download_tatoeba_data rejects unknown language codes."""
+        success, msg = tatoeba_data.download_tatoeba_data("klingon")
+        self.assertFalse(success)
+        self.assertIn("klingon", msg)
+
     @patch('src.core.tatoeba_data.requests.get')
     def test_download_tatoeba_data_network_error(self, mock_get):
         mock_get.side_effect = tatoeba_data.requests.exceptions.RequestException("Connection refused")
         
-        success, msg = tatoeba_data.download_tatoeba_data("English")
+        success, msg = tatoeba_data.download_tatoeba_data("eng")
         self.assertFalse(success)
         self.assertIn("Connection", msg)
 
@@ -117,7 +148,7 @@ class TestTatoebaData(unittest.TestCase):
         with open(file_path, "w", encoding="utf-8") as f:
             f.write("1\t猫が好き\t100\tI like cats\n1\t猫が好き\t101\tI really like cats\n")
             
-        index = tatoeba_data.load_index("English")
+        index = tatoeba_data.load_index("eng")
         self.assertIsNotNone(index)
         self.assertIn("猫が好き", index)
         self.assertEqual(len(index["猫が好き"]), 2)
@@ -125,17 +156,17 @@ class TestTatoebaData(unittest.TestCase):
         self.assertEqual(index["猫が好き"][1], ("猫が好き", "I really like cats"))
 
     def test_load_index_missing_file(self):
-        index = tatoeba_data.load_index("French")
+        index = tatoeba_data.load_index("fra")
         self.assertIsNone(index)
 
     def test_is_data_available_true(self):
         file_path = tatoeba_data.get_data_file_path("eng")
         with open(file_path, "w", encoding="utf-8") as f:
             f.write("dummy")
-        self.assertTrue(tatoeba_data.is_data_available("English"))
+        self.assertTrue(tatoeba_data.is_data_available("eng"))
 
     def test_is_data_available_false(self):
-        self.assertFalse(tatoeba_data.is_data_available("French"))
+        self.assertFalse(tatoeba_data.is_data_available("fra"))
 
     def test_get_file_status_after_download(self):
         now_str = datetime.datetime.now().isoformat()
@@ -148,9 +179,9 @@ class TestTatoebaData(unittest.TestCase):
         with open(tatoeba_data.METADATA_FILE, "w", encoding="utf-8") as f:
             json.dump(metadata, f)
             
-        status = tatoeba_data.get_file_status("English")
+        status = tatoeba_data.get_file_status("eng")
         self.assertEqual(status, now_str)
-        self.assertIsNone(tatoeba_data.get_file_status("French"))
+        self.assertIsNone(tatoeba_data.get_file_status("fra"))
 
     # ── SQLite index tests ──────────────────────────────────────────
 
@@ -337,7 +368,7 @@ class TestTatoebaData(unittest.TestCase):
 
         with patch('src.core.tatoeba_data.requests.get', return_value=mock_response):
             with patch('src.core.tatoeba_data.build_pairs_tsv', return_value="1\t猫\t100\tcat\n"):
-                tatoeba_data.download_tatoeba_data("English", progress_callback=callback)
+                tatoeba_data.download_tatoeba_data("eng", progress_callback=callback)
 
         self.assertGreaterEqual(callback.call_count, 6)
 
@@ -417,7 +448,7 @@ class TestTatoebaData(unittest.TestCase):
         """download_tatoeba_data calls download_and_extract_bz2 3 times (corpus) and download_audio_ids once."""
         mock_dl_bz2.return_value = "mock tsv content"
 
-        tatoeba_data.download_tatoeba_data("English")
+        tatoeba_data.download_tatoeba_data("eng")
 
         self.assertEqual(mock_dl_bz2.call_count, 3)
         mock_audio_ids.assert_called_once_with(tatoeba_data.AUDIO_INDEX_URL)

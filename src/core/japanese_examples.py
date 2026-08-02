@@ -108,7 +108,8 @@ def find_japanese_sentence(word, translation_language='eng', max_results=50):
 
     Args:
     - word (str): The word to search for in Japanese sentences.
-    - translation_language (str): The language code for the translation language. Default is 'eng' for English. Possibilities are 'eng' or 'fra'.
+    - translation_language (str): The ISO 639-3 language code for the translation language.
+      Default is 'eng' for English. Any registry code is valid (e.g. 'eng', 'fra', 'spa', 'cmn', 'kor').
     - max_results (int): The maximum number of results to return. Default is 50.
 
     Returns:
