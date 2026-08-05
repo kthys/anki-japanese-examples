@@ -125,10 +125,13 @@ class TestBatchUI(unittest.TestCase):
     # ── BatchDialog widget tests ────────────────────────────────────
 
     def test_batch_dialog_creates_language_combo(self):
-        """BatchDialog should have a language QComboBox."""
+        """BatchDialog should have a language QComboBox populated from the registry."""
         dialog = self.batch_ui.BatchDialog()
         self.assertIsNotNone(dialog.language_combo)
-        self.assertEqual(dialog.language_combo.addItem.call_count, 2)
+        self.assertEqual(dialog.language_combo.addItem.call_count, 5)
+        # Combo items carry the registry ISO codes as data — not hardcoded labels
+        codes = [call_args[0][1] for call_args in dialog.language_combo.addItem.call_args_list]
+        self.assertEqual(codes, ["eng", "fra", "spa", "cmn", "kor"])
 
     def test_batch_dialog_creates_deck_combo(self):
         """BatchDialog should have a deck QComboBox populated from Anki."""

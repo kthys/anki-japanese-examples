@@ -51,6 +51,82 @@ def _parse_api_results(data):
     return sentences
 
 
+_API_URL = "https://tatoeba.org/en/api_v0/search"
+# The api_v0 search endpoint returns at most 10 results per request no matter
+# what "limit" is sent — "limit" only shifts the page offsets. Fetching more
+# than 10 sentences therefore requires walking the "page" parameter.
+_PER_PAGE = 10
+_MAX_PAGES = 10
+
+
+def _fetch_sentences(base_params, max_results, exclude_ids=None):
+    """
+    Fetch up to max_results parsed sentences, walking api_v0 pagination.
+
+    Args:
+    - base_params (dict): Query parameters common to every page request.
+    - max_results (int): Stop once this many sentences have been collected.
+    - exclude_ids (set, optional): jpn_ids to skip (already-collected sentences).
+
+    Returns:
+    - A list of sentence dicts (see _parse_api_results). May overshoot
+      max_results by up to a page; callers cap after audio-first sorting so
+      the cap never drops an audio sentence in favor of a non-audio one.
+
+    Raises requests/JSON errors only if the first page fails; a failure on a
+    later page logs the error and returns the sentences gathered so far.
+    """
+    sentences = []
+    page = 1
+    while len(sentences) < max_results and page <= _MAX_PAGES:
+        params = {**base_params, "limit": _PER_PAGE, "page": page}
+        try:
+            response = _session.get(_API_URL, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+        except (requests.exceptions.RequestException, ValueError):
+            if page == 1:
+                raise
+            logger.exception("Tatoeba API request failed on page %d", page)
+            break
+        parsed = _parse_api_results(data)
+        if exclude_ids:
+            parsed = [s for s in parsed if s['jpn_id'] not in exclude_ids]
+        sentences.extend(parsed)
+        paging = (data.get('paging') or {}).get('Sentences') or {}
+        if not paging.get('nextPage'):
+            break
+        page += 1
+    return sentences
+
+
+def test_tatoeba_connection() -> tuple:
+    """
+    Ping the Tatoeba search API with a minimal request.
+
+    Used by the config dialog's "Test connection" button (CONF-01). A plain
+    reachability check of the API host would not be enough: the request must
+    also return valid JSON so a proxy error page or a changed endpoint is
+    reported as a failure.
+
+    Returns:
+    - A (success, message) tuple. message is a localized user-facing string
+      (see ``test_connection_success`` / ``test_connection_failed`` keys).
+    """
+    try:
+        response = _session.get(
+            _API_URL,
+            params={"query": "猫", "limit": 1, "page": 1},
+            timeout=10,
+        )
+        response.raise_for_status()
+        response.json()
+    except (requests.exceptions.RequestException, ValueError) as exc:
+        logger.warning("Tatoeba connection test failed: %s", exc)
+        return False, _("test_connection_failed").format(error=str(exc))
+    return True, _("test_connection_success")
+
+
 def find_japanese_sentence(word, translation_language='eng', max_results=50):
     """
     Find Japanese sentences containing a given word using the Tatoeba API.
@@ -59,7 +135,8 @@ def find_japanese_sentence(word, translation_language='eng', max_results=50):
 
     Args:
     - word (str): The word to search for in Japanese sentences.
-    - translation_language (str): The language code for the translation language. Default is 'eng' for English. Possibilities are 'eng' or 'fra'.
+    - translation_language (str): The ISO 639-3 language code for the translation language.
+      Default is 'eng' for English. Any registry code is valid (e.g. 'eng', 'fra', 'spa', 'cmn', 'kor').
     - max_results (int): The maximum number of results to return. Default is 50.
 
     Returns:
@@ -67,19 +144,15 @@ def find_japanese_sentence(word, translation_language='eng', max_results=50):
     - If no sentences were found, returns a string indicating that no sentences were found.
     - If there is an error connecting to the Tatoeba API, returns an error message.
     """
-    url = "https://tatoeba.org/en/api_v0/search"
     base_params = {
         "query": f"={word}",
         "from": "jpn",
         "to": translation_language,
     }
 
-    audio_sentences = []
     try:
-        params = {**base_params, "has_audio": "yes", "limit": max_results}
-        response = _session.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        audio_sentences = _parse_api_results(response.json())
+        audio_sentences = _fetch_sentences(
+            {**base_params, "has_audio": "yes"}, max_results)
         audio_sentences.sort(key=lambda s: 0 if s['has_audio'] else 1)
     except (requests.exceptions.RequestException, ValueError):
         logger.exception("Tatoeba API request (audio) failed")
@@ -89,13 +162,9 @@ def find_japanese_sentence(word, translation_language='eng', max_results=50):
         return audio_sentences[:max_results]
 
     seen_ids = {s['jpn_id'] for s in audio_sentences if s['jpn_id']}
-    fill_sentences = []
     try:
-        params = {**base_params, "limit": max_results}
-        response = _session.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        all_results = _parse_api_results(response.json())
-        fill_sentences = [s for s in all_results if s['jpn_id'] not in seen_ids]
+        fill_sentences = _fetch_sentences(
+            base_params, max_results - len(audio_sentences), exclude_ids=seen_ids)
     except (requests.exceptions.RequestException, ValueError):
         logger.exception("Tatoeba API request (fill) failed")
         if audio_sentences:

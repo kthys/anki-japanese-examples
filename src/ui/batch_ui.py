@@ -23,6 +23,14 @@ except ImportError:
     from src.core import tatoeba_data
 
 try:
+    from ..core import languages
+except ImportError:
+    try:
+        from src.core import languages
+    except Exception:
+        languages = None  # type: ignore
+
+try:
     from ..core import batch_engine
 except ImportError:
     from src.core import batch_engine
@@ -114,8 +122,8 @@ class BatchDialog(QDialog):
         lang_row = QHBoxLayout()
         lang_label = QLabel(_("batch_language_label"))
         self.language_combo = QComboBox()
-        self.language_combo.addItem(_("batch_language_english"), "English")
-        self.language_combo.addItem(_("batch_language_french"), "French")
+        for code in languages.get_codes():
+            self.language_combo.addItem(languages.get_localized_name(code), code)
         self.language_combo.currentIndexChanged.connect(self._update_file_status)
         lang_row.addWidget(lang_label)
         lang_row.addWidget(self.language_combo)
@@ -493,7 +501,7 @@ class BatchDialog(QDialog):
                 if tatoeba_data.os.path.exists(tatoeba_data.METADATA_FILE):
                     with open(tatoeba_data.METADATA_FILE, "r", encoding="utf-8") as f:
                         md = json.load(f)
-                        count = md.get(tatoeba_data.LANG_MAP.get(lang), {}).get("count", 0)
+                        count = md.get(lang, {}).get("count", 0)
             except Exception:
                 logger.warning("Could not read pair count from metadata", exc_info=True)
 
@@ -689,7 +697,7 @@ class BatchDialog(QDialog):
             holder["result"] = batch_engine.run_batch(
                 col=col,
                 deck_id=deck_id,
-                lang_label=lang,
+                lang_code=lang,
                 source_field=source_field,
                 dest_field_pairs=dest_field_pairs,
                 skip_existing=skip_existing,

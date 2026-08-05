@@ -171,6 +171,78 @@ class TestConfigUI(unittest.TestCase):
         dialog.save_config()
         self.assertEqual(dialog.config["audioDstField"], "MyAudio")
 
+    # ── max sentence options ────────────────────────────────────────
+
+    def test_max_options_widget_shown_in_dialog(self):
+        """Should create a max_options QSpinBox widget during setup."""
+        dialog = self.config_ui.ConfigDialog()
+        self.assertIsNotNone(dialog.max_options)
+
+    def test_max_options_initialized_from_config(self):
+        """Should initialize the spinbox with the maxSentenceOptions config value."""
+        config_with_options = {
+            "japaneseDstField": "ExampleJapanese",
+            "translationDstField": "ExampleTranslated",
+            "maxSentenceOptions": 42,
+        }
+        self.mock_mw.addonManager.getConfig.return_value = config_with_options
+        if 'src.ui.config_ui' in sys.modules:
+            del sys.modules['src.ui.config_ui']
+        import src.ui.config_ui as config_ui_fresh
+        dialog = config_ui_fresh.ConfigDialog()
+        dialog.max_options.setValue.assert_called_with(42)
+
+    def test_save_config_writes_max_sentence_options(self):
+        """Should write maxSentenceOptions to config on save."""
+        dialog = self.config_ui.ConfigDialog()
+        dialog.jp_field = MagicMock()
+        dialog.jp_field.text.return_value = "JF"
+        dialog.tr_field = MagicMock()
+        dialog.tr_field.text.return_value = "TF"
+        dialog.audio_field = MagicMock()
+        dialog.audio_field.text.return_value = "AF"
+        dialog.max_options = MagicMock()
+        dialog.max_options.value.return_value = 60
+        dialog.config = {}
+        dialog.save_config()
+        self.assertEqual(dialog.config["maxSentenceOptions"], 60)
+
+    # ── test connection ────────────────────────────────────────────
+
+    def test_test_connection_button_present(self):
+        """Config dialog should have a Test Connection button wired to test_connection."""
+        dialog = self.config_ui.ConfigDialog()
+        calls = self.mock_utils.QPushButton.return_value.clicked.connect.call_args_list
+        self.assertTrue(
+            any(c[0][0] == dialog.test_connection for c in calls),
+            "Test Connection button is not wired to dialog.test_connection",
+        )
+
+    def test_test_connection_success_shows_info(self):
+        """test_connection should show a success info dialog on success."""
+        dialog = self.config_ui.ConfigDialog()
+        with patch('src.ui.config_ui.test_tatoeba_connection',
+                   return_value=(True, "ok")) as mock_test:
+            dialog.test_connection()
+        mock_test.assert_called_once()
+        self.mock_utils.showInfo.assert_called_with("ok")
+
+    def test_test_connection_failure_shows_warning(self):
+        """test_connection should show a warning dialog on failure."""
+        dialog = self.config_ui.ConfigDialog()
+        with patch('src.ui.config_ui.test_tatoeba_connection',
+                   return_value=(False, "boom")) as mock_test:
+            dialog.test_connection()
+        mock_test.assert_called_once()
+        self.mock_utils.showWarning.assert_called_with("boom")
+
+    def test_test_connection_unavailable_shows_warning(self):
+        """test_connection should warn without crashing when the module is unavailable."""
+        dialog = self.config_ui.ConfigDialog()
+        with patch('src.ui.config_ui.test_tatoeba_connection', None):
+            dialog.test_connection()
+        self.mock_utils.showWarning.assert_called_once()
+
 
 if __name__ == '__main__':
     unittest.main()

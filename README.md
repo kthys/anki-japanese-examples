@@ -19,7 +19,8 @@ Japanese Examples is a plugin for the Anki flashcard software that adds example 
 - **Deck and Subdeck Selection**: Process a whole deck tree or a single subdeck, with a confirmation before processing an entire tree.
 - **Undoable Batch Runs**: Press Ctrl+Z to revert added examples and audio after a batch run, and get a report of the results, including any audio errors.
 - **Always Up-to-Date**: For single additions, the plugin connects directly to the Tatoeba API to ensure you have the latest available examples.
-- **Multilingual UI**: The plugin interface and menus are automatically translated into French or English based on your Anki language settings.
+- **Multilingual UI**: The plugin interface and menus are automatically translated into English, French, Spanish, Chinese (simplified), or Korean based on your Anki language settings.
+- **Five Translation Languages**: Get example sentence translations in English, French, Spanish, Chinese (simplified), or Korean — choose a language in the editor dialog, set a per-deck default, or pick the language in the batch dialog.
 
 ## Installation
 
@@ -50,11 +51,45 @@ Japanese Examples is a plugin for the Anki flashcard software that adds example 
 ### Batch Processing
 
 1. In the main Anki window, go to **Tools > Batch process examples**.
-2. In the "**Data Management**" section, choose your target language (English or French) and click **Download data**. Wait for the progress to complete.
+2. In the "**Data Management**" section, choose your target language — English, French, Spanish, Chinese (simplified), or Korean — and click **Download data**. Wait for the progress to complete.
 3. In the "**Execution**" section, select your target Deck — you can process a whole deck tree (including its subdecks) or narrow it down to a single subdeck.
 4. Map the Source field (containing your lookup word), then the Japanese example, Translated example, and Audio fields. You can add up to 3 example/translation field pairs to fill several examples per card.
 5. Check "Skip cards with existing examples" if you only want to process empty cards.
 6. Click **Run batch process** and let the engine populate your deck! A report shows the results when it finishes, including audio downloads, and you can press **Ctrl+Z** to undo the whole run.
+
+## FAQ / Troubleshooting
+
+### "No example found" when I search for a word — why?
+
+Sentence matching is approximate: the plugin tokenizes Japanese with a regex-based tokenizer (no morphological analyzer), so conjugated or unusual word forms may not match. Try a simpler form of the word (e.g. the dictionary form 食べる instead of 食べた). For single additions, results come live from Tatoeba — a rare word may genuinely have no sentence with a translation in your target language.
+
+### Does the add-on need internet access?
+
+Yes, for two things: single-card additions query the Tatoeba API live, and batch mode must download the Tatoeba datasets before its first run. If you suspect connectivity problems, open the add-on settings and use the **Test Connection** button to check that the Tatoeba API is reachable.
+
+### How much disk space do the downloaded datasets take, and where are they stored?
+
+Batch mode downloads per-language Tatoeba sentence exports and builds a local SQLite index. Everything is stored in the `user_files/` folder inside the add-on directory (roughly a few hundred MB per language). You can delete a language's files at any time to free space — the batch dialog will simply ask you to re-download them.
+
+### Why is audio missing for some sentences?
+
+Audio is best-effort: only a subset of Tatoeba sentences have native-speaker recordings. In both modes the plugin prefers sentences that have recordings, but if the chosen sentence has none (or Tatoeba returns "no recording"), the audio field is simply left empty. This is expected, not an error.
+
+### Can I undo a batch run?
+
+Yes. Each batch run is wrapped in a single undo entry — press **Ctrl+Z** right after the run to revert the added examples and audio. Audio file downloads are not covered by undo, but the `[sound:]` tags in your cards are.
+
+### My Anki interface is in a language the add-on doesn't support yet — what happens?
+
+The add-on follows your Anki UI language. English, French, Spanish, Chinese (simplified), and Korean are fully translated; any other language falls back to English.
+
+### The editor button or the settings don't work as expected
+
+The editor button lives in the card editor's formatting bar. If it is missing, check that the add-on is enabled in **Tools > Add-ons**. For "field not found" errors, open the add-on settings (**Tools > Add-ons > select "Japanese example sentences" > Config**) and make sure the configured field names match your note type exactly. Use **Test Connection** in the same dialog to verify Tatoeba is reachable.
+
+### Why were some cards skipped during batch processing?
+
+Cards are skipped when: they already have examples in every destination pair and "Skip cards with existing examples" is checked; no matching sentence was found in the local index; or the note type lacks the configured source or destination fields. The final report shows the exact count for each skip reason.
 
 ## License
 

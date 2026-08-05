@@ -2,5 +2,6 @@
 	"japaneseDstField": "ExampleJapanese",
 	"translationDstField": "ExampleTranslated",
 	"audioDstField": "ExampleAudio",
+	"maxSentenceOptions": 30,
 	"last_seen_version": ""
 }

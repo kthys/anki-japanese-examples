@@ -97,7 +97,6 @@ class TestRunBatch(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_run_batch_updates_notes(self, mock_td):
         """run_batch should update notes when matches are found."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [("1", "猫が好きです。", "I like cats.", 0)]
 
@@ -109,7 +108,7 @@ class TestRunBatch(unittest.TestCase):
         col = self._make_mock_col([1], {1: note})
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated", None)],
             skip_existing=True
         )
@@ -124,7 +123,6 @@ class TestRunBatch(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_run_batch_skips_existing(self, mock_td):
         """run_batch should skip notes that already have examples when skip_existing=True."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [("1", "猫が好きです。", "I like cats.", 0)]
 
@@ -136,7 +134,7 @@ class TestRunBatch(unittest.TestCase):
         col = self._make_mock_col([1], {1: note})
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated", None)],
             skip_existing=True
         )
@@ -148,7 +146,6 @@ class TestRunBatch(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_run_batch_no_skip_when_disabled(self, mock_td):
         """run_batch should overwrite existing examples when skip_existing=False."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [("2", "新しい例。", "New example.", 0)]
 
@@ -160,7 +157,7 @@ class TestRunBatch(unittest.TestCase):
         col = self._make_mock_col([1], {1: note})
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated", None)],
             skip_existing=False
         )
@@ -171,7 +168,6 @@ class TestRunBatch(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_run_batch_no_match(self, mock_td):
         """run_batch should count notes with no match as skipped_no_match."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = []
 
@@ -183,7 +179,7 @@ class TestRunBatch(unittest.TestCase):
         col = self._make_mock_col([1], {1: note})
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated", None)]
         )
 
@@ -193,7 +189,6 @@ class TestRunBatch(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_run_batch_missing_source_field(self, mock_td):
         """run_batch should skip notes missing the source field."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
 
         field_order = ["OtherField", "ExampleJapanese", "ExampleTranslated"]
@@ -204,7 +199,7 @@ class TestRunBatch(unittest.TestCase):
         col = self._make_mock_col([1], {1: note})
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated", None)]
         )
 
@@ -213,11 +208,10 @@ class TestRunBatch(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_run_batch_unknown_language(self, mock_td):
         """run_batch should return empty result for unknown language."""
-        mock_td.LANG_MAP = {"English": "eng"}
 
         col = MagicMock()
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="Klingon",
+            col=col, deck_id=1, lang_code="Klingon",
             source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated", None)]
         )
 
@@ -228,7 +222,6 @@ class TestRunBatch(unittest.TestCase):
     @patch('src.core.batch_engine.random.sample')
     def test_run_batch_selects_random_sample(self, mock_sample, mock_td):
         """run_batch should use random.sample when multiple matches exist."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         matches = [("3", "例文A。", "Example A.", 0), ("4", "例文B。", "Example B.", 0)]
         mock_td.search_word.return_value = matches
@@ -242,7 +235,7 @@ class TestRunBatch(unittest.TestCase):
         col = self._make_mock_col([1], {1: note})
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word", dest_field_pairs=[("ExampleJapanese", "ExampleTranslated", None)]
         )
 
@@ -256,7 +249,6 @@ class TestRunBatch(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_run_batch_multiple_pairs(self, mock_td):
         """run_batch should populate multiple fields when dest_field_pairs > 1."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         
         matches = [
@@ -279,7 +271,7 @@ class TestRunBatch(unittest.TestCase):
         col = self._make_mock_col([1], {1: note})
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word",
             dest_field_pairs=[
                 ("Jpn1", "Trans1", None),
@@ -302,7 +294,6 @@ class TestRunBatch(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_run_batch_audio_field_populates_pending_audio(self, mock_td):
         """audio_field not None causes pending_audio to accumulate entries."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [("555", "猫が好きです。", "I like cats.", 0)]
 
@@ -314,7 +305,7 @@ class TestRunBatch(unittest.TestCase):
         col = self._make_mock_col([1], {1: note})
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word",
             dest_field_pairs=[("ExampleJapanese", "ExampleTranslated", "ExampleAudio")],
             skip_existing=True
@@ -330,7 +321,6 @@ class TestRunBatch(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_run_batch_no_audio_field_leaves_pending_audio_empty(self, mock_td):
         """audio_field=None means no pending_audio entries."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [("556", "猫が好きです。", "I like cats.", 0)]
 
@@ -342,7 +332,7 @@ class TestRunBatch(unittest.TestCase):
         col = self._make_mock_col([1], {1: note})
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word",
             dest_field_pairs=[("ExampleJapanese", "ExampleTranslated", None)],
             skip_existing=True
@@ -624,7 +614,6 @@ class TestUndoBracketing(unittest.TestCase):
 
     @patch('src.core.batch_engine.tatoeba_data')
     def test_run_batch_with_undo_name_brackets_and_stores_changes(self, mock_td):
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [("10", "猫A。", "Cat A.", 0)]
 
@@ -633,7 +622,7 @@ class TestUndoBracketing(unittest.TestCase):
         col.merge_undo_entries.return_value = "OPCHANGES"
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word",
             dest_field_pairs=[("Jpn", "Trans", None)],
             undo_name="Add Japanese examples",
@@ -646,14 +635,13 @@ class TestUndoBracketing(unittest.TestCase):
 
     @patch('src.core.batch_engine.tatoeba_data')
     def test_run_batch_without_undo_name_skips_bracketing(self, mock_td):
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [("10", "猫A。", "Cat A.", 0)]
 
         col = self._make_col_with_one_note()
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word",
             dest_field_pairs=[("Jpn", "Trans", None)],
         )
@@ -718,7 +706,6 @@ class TestPerPairSkipLogic(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_skip_existing_per_pair_partial(self, mock_td):
         """Card with pair 1 filled and pair 2 empty: pair 1 untouched, pair 2 populated."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [
             ("10", "猫A。", "Cat A.", 0),
@@ -737,7 +724,7 @@ class TestPerPairSkipLogic(unittest.TestCase):
         col = self._make_mock_col([1], {1: note})
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word",
             dest_field_pairs=[("Jpn1", "Trans1", None), ("Jpn2", "Trans2", None)],
             skip_existing=True,
@@ -755,7 +742,6 @@ class TestPerPairSkipLogic(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_skip_existing_per_pair_all_filled(self, mock_td):
         """Card with all pairs filled: counted as skipped_existing, update_note not called."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [
             ("10", "猫A。", "Cat A.", 0),
@@ -774,7 +760,7 @@ class TestPerPairSkipLogic(unittest.TestCase):
         col = self._make_mock_col([1], {1: note})
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word",
             dest_field_pairs=[("Jpn1", "Trans1", None), ("Jpn2", "Trans2", None)],
             skip_existing=True,
@@ -787,7 +773,6 @@ class TestPerPairSkipLogic(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_skip_existing_per_pair_none_filled(self, mock_td):
         """Card with all pairs empty: both pairs populated, counted as updated."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [
             ("10", "猫A。", "Cat A.", 0),
@@ -802,7 +787,7 @@ class TestPerPairSkipLogic(unittest.TestCase):
         col = self._make_mock_col([1], {1: note})
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word",
             dest_field_pairs=[("Jpn1", "Trans1", None), ("Jpn2", "Trans2", None)],
             skip_existing=True,
@@ -818,7 +803,6 @@ class TestPerPairSkipLogic(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_skip_existing_per_pair_audio_not_queued_for_skipped(self, mock_td):
         """Audio queued only for pairs actually written, not for skipped pairs."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [
             ("10", "猫A。", "Cat A.", 0),
@@ -837,7 +821,7 @@ class TestPerPairSkipLogic(unittest.TestCase):
         col = self._make_mock_col([1], {1: note})
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word",
             dest_field_pairs=[("Jpn1", "Trans1", "Audio1"), ("Jpn2", "Trans2", "Audio2")],
             skip_existing=True,
@@ -849,7 +833,6 @@ class TestPerPairSkipLogic(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_skip_existing_per_pair_no_update_note_when_all_skipped(self, mock_td):
         """Single pair already filled: update_note not called, skipped_existing==1."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [("10", "猫A。", "Cat A.", 0)]
 
@@ -861,7 +844,7 @@ class TestPerPairSkipLogic(unittest.TestCase):
         col = self._make_mock_col([1], {1: note})
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word",
             dest_field_pairs=[("Jpn1", "Trans1", None)],
             skip_existing=True,
@@ -873,7 +856,6 @@ class TestPerPairSkipLogic(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_skip_existing_only_one_field_filled_not_considered_existing(self, mock_td):
         """Pair with only one field filled is NOT considered existing; pair gets written."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [("10", "猫A。", "Cat A.", 0)]
 
@@ -885,7 +867,7 @@ class TestPerPairSkipLogic(unittest.TestCase):
         col = self._make_mock_col([1], {1: note})
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word",
             dest_field_pairs=[("Jpn1", "Trans1", None)],
             skip_existing=True,
@@ -898,7 +880,6 @@ class TestPerPairSkipLogic(unittest.TestCase):
     def test_filled_pair_does_not_starve_empty_pair_of_scarce_match(self, mock_td):
         """Pair 1 filled, pair 2 empty, only ONE match: the match must go to
         pair 2 instead of being consumed by the skipped pair 1."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [("10", "猫A。", "Cat A.", 0)]
 
@@ -914,7 +895,7 @@ class TestPerPairSkipLogic(unittest.TestCase):
         col = self._make_mock_col([1], {1: note})
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word",
             dest_field_pairs=[("Jpn1", "Trans1", None), ("Jpn2", "Trans2", None)],
             skip_existing=True,
@@ -929,7 +910,6 @@ class TestPerPairSkipLogic(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_fully_filled_note_skips_database_search(self, mock_td):
         """All pairs filled: search_word must not be called at all."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [("10", "猫A。", "Cat A.", 0)]
 
@@ -941,7 +921,7 @@ class TestPerPairSkipLogic(unittest.TestCase):
         col = self._make_mock_col([1], {1: note})
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word",
             dest_field_pairs=[("Jpn1", "Trans1", None)],
             skip_existing=True,
@@ -955,7 +935,6 @@ class TestPerPairSkipLogic(unittest.TestCase):
         """A sentence already present in a filled pair must not be picked again
         for another pair on a re-run (comparison is against the HTML-escaped
         text stored in the field)."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [
             ("10", "猫&犬。", "Cat & dog.", 0),
@@ -975,7 +954,7 @@ class TestPerPairSkipLogic(unittest.TestCase):
         col = self._make_mock_col([1], {1: note})
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word",
             dest_field_pairs=[("Jpn1", "Trans1", None), ("Jpn2", "Trans2", None)],
             skip_existing=True,
@@ -988,7 +967,6 @@ class TestPerPairSkipLogic(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_skip_existing_false_overwrites_filled_pairs(self, mock_td):
         """skip_existing=False: filled pairs are overwritten, nothing filtered."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [
             ("10", "猫A。", "Cat A.", 0),
@@ -1007,7 +985,7 @@ class TestPerPairSkipLogic(unittest.TestCase):
         col = self._make_mock_col([1], {1: note})
 
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word",
             dest_field_pairs=[("Jpn1", "Trans1", None), ("Jpn2", "Trans2", None)],
             skip_existing=False,
@@ -1049,7 +1027,6 @@ class TestAudioPrioritizationSelection(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_audio_first_prefers_audio_matches(self, mock_td):
         """Audio-first selection: when 2 pairs requested and 2 audio + 1 non-audio exist, both pairs come from audio matches."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [
             ("A1", "音声A。", "Audio A.", 1),
@@ -1067,7 +1044,7 @@ class TestAudioPrioritizationSelection(unittest.TestCase):
         import random as _random
         _random.seed(42)
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word",
             dest_field_pairs=[("Jpn1", "Trans1", None), ("Jpn2", "Trans2", None)],
             skip_existing=False,
@@ -1082,7 +1059,6 @@ class TestAudioPrioritizationSelection(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_all_audio_pool_no_non_audio_selected(self, mock_td):
         """All matches have audio: both pairs get filled, result.updated == 1."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [
             ("A1", "音声A。", "Audio A.", 1),
@@ -1099,7 +1075,7 @@ class TestAudioPrioritizationSelection(unittest.TestCase):
         import random as _random
         _random.seed(42)
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word",
             dest_field_pairs=[("Jpn1", "Trans1", None), ("Jpn2", "Trans2", None)],
             skip_existing=False,
@@ -1112,7 +1088,6 @@ class TestAudioPrioritizationSelection(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_empty_audio_pool_falls_back_to_non_audio(self, mock_td):
         """No audio matches: falls back gracefully to non-audio selection. result.updated == 1."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [
             ("N1", "普通A。", "Normal A.", 0),
@@ -1129,7 +1104,7 @@ class TestAudioPrioritizationSelection(unittest.TestCase):
         import random as _random
         _random.seed(42)
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word",
             dest_field_pairs=[("Jpn1", "Trans1", None)],
             skip_existing=False,
@@ -1141,7 +1116,6 @@ class TestAudioPrioritizationSelection(unittest.TestCase):
     @patch('src.core.batch_engine.tatoeba_data')
     def test_mixed_pool_audio_fills_first_then_non_audio(self, mock_td):
         """1 audio + 2 non-audio, 2 pairs: first pair gets audio match, second gets non-audio."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [
             ("A1", "音声A。", "Audio A.", 1),
@@ -1159,7 +1133,7 @@ class TestAudioPrioritizationSelection(unittest.TestCase):
         import random as _random
         _random.seed(42)
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word",
             dest_field_pairs=[("Jpn1", "Trans1", None), ("Jpn2", "Trans2", None)],
             skip_existing=False,
@@ -1178,7 +1152,6 @@ class TestAudioPrioritizationSelection(unittest.TestCase):
         """Regression: audio sentence must be assigned to the pair that has an audio field,
         not to a pair without one. When pair 0 has no audio field and pair 1 does, the
         audio sentence must land in pair 1's text AND be queued for pair 1's audio field."""
-        mock_td.LANG_MAP = {"English": "eng"}
         mock_td.get_db_path.return_value = self.temp_db_path
         mock_td.search_word.return_value = [
             ("A1", "音声A。", "Audio A.", 1),
@@ -1196,7 +1169,7 @@ class TestAudioPrioritizationSelection(unittest.TestCase):
         import random as _random
         _random.seed(0)
         result = batch_engine.run_batch(
-            col=col, deck_id=1, lang_label="English",
+            col=col, deck_id=1, lang_code="eng",
             source_field="Word",
             dest_field_pairs=[
                 ("Jpn1", "Trans1", None),       # pair 0: no audio field
@@ -1260,7 +1233,6 @@ class TestBuildDeckSearch(unittest.TestCase):
         try:
             with patch('src.core.batch_engine.SearchNode', None), \
                  patch('src.core.batch_engine.tatoeba_data') as mock_td:
-                mock_td.LANG_MAP = {"English": "eng"}
                 mock_td.get_db_path.return_value = temp_db_path
 
                 col = MagicMock()
@@ -1268,7 +1240,7 @@ class TestBuildDeckSearch(unittest.TestCase):
                 col.find_notes.return_value = []
 
                 batch_engine.run_batch(
-                    col=col, deck_id=7, lang_label="English",
+                    col=col, deck_id=7, lang_code="eng",
                     source_field="Word",
                     dest_field_pairs=[("Jpn", "Trans", None)],
                 )

@@ -11,6 +11,16 @@ except ImportError:
     from src.core.japanese_examples import find_japanese_sentence
 
 try:
+    from ..core.languages import get_codes, get_localized_name
+except ImportError:
+    try:
+        from src.core.languages import get_codes, get_localized_name
+    except ImportError:
+        # Fallback: keep the pre-registry two-language behavior
+        get_codes = lambda: ["eng", "fra"]
+        get_localized_name = lambda code: code
+
+try:
     from ..core.audio_fetcher import fetch_audio_to_temp, register_audio_file
 except ImportError:
     try:
@@ -250,7 +260,7 @@ def add_example_manually_dialog(editor):
         # User chooses where to get the examples from
         result = create_custom_dialog(
             _("select_translation_language_dialog"),
-            ['English', 'French'],
+            [get_localized_name(code) for code in get_codes()],
             with_checkbox=(deck_id is not None),
             checkbox_text=_('use_as_default_for_deck')
         )
@@ -264,11 +274,10 @@ def add_example_manually_dialog(editor):
              source_index = result
              save_default = False
 
-        # Determine target language code
-        if source_index == 0:
-            target_lang = 'eng'
-        elif source_index == 1:
-            target_lang = 'fra'
+        # Determine target language code from the registry
+        codes = get_codes()
+        if 0 <= source_index < len(codes):
+            target_lang = codes[source_index]
         else:
             # Should not happen given the dialog choices
             return
@@ -277,6 +286,14 @@ def add_example_manually_dialog(editor):
             deck_prefs[str(deck_id)] = target_lang
             config['deck_preferences'] = deck_prefs
             mw.addonManager.writeConfig(addon_name, config)
+
+    # How many sentence options to fetch and show in the selection dialog
+    try:
+        max_options = int(config.get("maxSentenceOptions", 30))
+    except (TypeError, ValueError):
+        max_options = 30
+    if max_options < 1:
+        max_options = 30
 
     # Define op variable to be accessible in on_success
     op = None
@@ -455,14 +472,14 @@ def add_example_manually_dialog(editor):
         # (Browser/Add window) instead of the main window. This ensures focus returns correctly when closing.
         op = QueryOp(
             parent=editor.parentWindow,
-            op=lambda col: find_japanese_sentence(japanese_word, target_lang),
+            op=lambda col: find_japanese_sentence(japanese_word, target_lang, max_results=max_options),
             success=on_success
         )
         _active_ops.add(op)
         op.with_progress(_("searching")).run_in_background()
     else:
         # Fallback for older versions: blocking call
-        examples_sentences = find_japanese_sentence(japanese_word, target_lang)
+        examples_sentences = find_japanese_sentence(japanese_word, target_lang, max_results=max_options)
         on_success(examples_sentences)
 
 def add_examples_buttons(buttons, editor):
