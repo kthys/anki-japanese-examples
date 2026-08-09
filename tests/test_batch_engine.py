@@ -1,7 +1,7 @@
 import sys
 import os
 import unittest
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 import tempfile
 
 # Add parent directory to path

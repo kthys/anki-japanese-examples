@@ -1,6 +1,6 @@
 from aqt import gui_hooks, mw
 from aqt.utils import Qt, QDialog, QVBoxLayout, QLabel, QListWidget, QDialogButtonBox, showInfo
-from aqt.qt import QCheckBox, QLineEdit, QPushButton, QFormLayout, QHBoxLayout, QTimer
+from aqt.qt import QCheckBox, QHBoxLayout, QTimer
 import os, html, logging
 
 logger = logging.getLogger(__name__)
