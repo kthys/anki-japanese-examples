@@ -8,6 +8,7 @@ import datetime
 import json
 import sqlite3
 import re
+import time
 from typing import Optional
 
 try:
@@ -36,6 +37,21 @@ TATOEBA_BASE_URL = "https://downloads.tatoeba.org/exports/per_language"
 AUDIO_INDEX_URL = "https://downloads.tatoeba.org/exports/sentences_with_audio.tar.bz2"
 USER_FILES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "user_files")
 METADATA_FILE = os.path.join(USER_FILES_DIR, "metadata.json")
+
+# Seconds to wait before retrying a failed download_to_file attempt, excluding
+# the initial attempt. Three attempts total (initial + these two). Tests patch
+# this to (0, 0) to avoid real sleeps.
+DOWNLOAD_RETRY_BACKOFF = (1.0, 4.0)
+
+# Transient conditions download_to_file retries: connection drops, timeouts,
+# chunked-encoding failures, and incomplete reads (a Content-Length mismatch
+# is raised as ConnectionError so it lands here too). HTTP 5xx is retried as
+# well but is detected separately via HTTPError.response.status_code.
+_RETRIABLE_EXC = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    requests.exceptions.ChunkedEncodingError,
+)
 
 # Regex pattern for tokenizing Japanese text: matches runs of kanji, katakana, or hiragana
 _TOKEN_RE = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf]+|[\u30a0-\u30ff]+|[\u3040-\u309f]+')
@@ -261,6 +277,104 @@ def get_download_urls(lang_code: str) -> dict:
         "target_sentences": f"{TATOEBA_BASE_URL}/{lang_code}/{lang_code}_sentences.tsv.bz2",
         "links": f"{TATOEBA_BASE_URL}/jpn/jpn-{lang_code}_links.tsv.bz2"
     }
+
+def _stream_url_to_file(url: str, dest_path: str, chunk_size: int) -> None:
+    """Perform a single streaming download of ``url`` to ``dest_path``.
+
+    Writes the response body to ``dest_path`` in ``chunk_size``-byte chunks so
+    peak memory stays bounded by the chunk buffer rather than the full file. If
+    the server advertises a ``Content-Length`` that does not match the bytes
+    actually received, a ``requests.exceptions.ConnectionError`` is raised
+    (silent truncation / incomplete read) so the caller's retry layer treats it
+    as a transient failure.
+
+    Requests' default ``decode_content`` behavior is left intact: if a server
+    ever gzip-wraps a ``.bz2``, transparent decoding still yields a valid bz2
+    stream for the importer.
+
+    No retry happens here — the retry policy lives in :func:`download_to_file`.
+    """
+    response = requests.get(url, stream=True, timeout=(15, 30))
+    try:
+        response.raise_for_status()
+        content_length = response.headers.get("Content-Length")
+        expected = int(content_length) if content_length and content_length.isdigit() else None
+        written = 0
+        with open(dest_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size):
+                if chunk:
+                    f.write(chunk)
+                    written += len(chunk)
+        if expected is not None and written != expected:
+            raise requests.exceptions.ConnectionError(
+                f"Truncated download for {url}: wrote {written} bytes, "
+                f"Content-Length reported {expected}"
+            )
+    finally:
+        response.close()
+
+
+def download_to_file(url: str, dest_path: str, chunk_size: int = 1 << 16) -> None:
+    """Stream ``url`` to ``dest_path`` on disk, with retry and truncation checks.
+
+    The body is streamed chunk-by-chunk (peak RAM ~ ``chunk_size``) and lands in
+    a sibling ``dest_path + ".part"`` file that is atomically renamed onto
+    ``dest_path`` only on success, so a partial file never appears at
+    ``dest_path`` after a failure.
+
+    Retry policy (streaming plan, decision D1): up to three attempts total
+    (initial + two retries) with ``DOWNLOAD_RETRY_BACKOFF`` backoff, retried
+    *only* on connection errors, timeouts, chunked-encoding failures, and HTTP
+    5xx responses. Any 4xx — including 404 — surfaces immediately with no retry:
+    a 404 means Tatoeba renamed or moved the file, and retrying only delays the
+    real error. A ``Content-Length`` mismatch is raised as a ``ConnectionError``
+    and is therefore retried as a transient failure.
+
+    Args:
+        url: The URL to download.
+        dest_path: Absolute path to write the downloaded bytes to. The parent
+            directory must already exist.
+        chunk_size: Chunk size in bytes forwarded to ``response.iter_content``.
+
+    Raises:
+        requests.exceptions.HTTPError: for non-retriable (4xx) HTTP errors.
+        requests.exceptions.RequestException: for retriable errors that persist
+            after all attempts are exhausted.
+    """
+    part_path = dest_path + ".part"
+    total_attempts = len(DOWNLOAD_RETRY_BACKOFF) + 1
+    success = False
+    try:
+        for attempt in range(total_attempts):
+            try:
+                _stream_url_to_file(url, part_path, chunk_size)
+                os.replace(part_path, dest_path)
+                success = True
+                return
+            except requests.exceptions.HTTPError as exc:
+                status = exc.response.status_code if exc.response is not None else None
+                if status is not None and 500 <= status < 600 and attempt < total_attempts - 1:
+                    logging.warning(
+                        "download_to_file: HTTP %s for %s (attempt %d/%d); retrying",
+                        status, url, attempt + 1, total_attempts)
+                    time.sleep(DOWNLOAD_RETRY_BACKOFF[attempt])
+                    continue
+                raise  # 4xx (incl. 404) or final 5xx: do not retry
+            except _RETRIABLE_EXC as exc:
+                if attempt < total_attempts - 1:
+                    logging.warning(
+                        "download_to_file: transient error for %s (attempt %d/%d): %s; retrying",
+                        url, attempt + 1, total_attempts, exc)
+                    time.sleep(DOWNLOAD_RETRY_BACKOFF[attempt])
+                    continue
+                raise
+    finally:
+        if not success and os.path.exists(part_path):
+            try:
+                os.remove(part_path)
+            except OSError:
+                logging.warning("download_to_file: could not remove %s", part_path)
+
 
 def download_and_extract_bz2(url: str) -> str:
     """

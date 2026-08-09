@@ -6,6 +6,7 @@ import tempfile
 import json
 import datetime
 import bz2
+import requests
 
 # Mock aqt before importing our module
 sys.modules['aqt'] = MagicMock()
@@ -17,6 +18,34 @@ sys.modules['aqt.qt'] = MagicMock()
 if "src.core.tatoeba_data" in sys.modules:
     del sys.modules["src.core.tatoeba_data"]
 import src.core.tatoeba_data as tatoeba_data
+
+
+def _streaming_response(payload, status=200, headers=None, chunk=7):
+    """Build a MagicMock response that streams ``payload`` in small chunks.
+
+    Each call to ``iter_content`` returns a fresh iterator over the same chunk
+    list, so the mock survives multiple retry attempts against the same object.
+    """
+    resp = MagicMock()
+    resp.status_code = status
+    resp.raise_for_status.return_value = None
+    resp.headers = headers if headers is not None else {}
+    chunks = [payload[i:i + chunk] for i in range(0, len(payload), chunk)]
+    resp.iter_content.side_effect = lambda *a, **k: iter(chunks)
+    resp.close.return_value = None
+    return resp
+
+
+def _error_response(status):
+    """Build a MagicMock response whose ``raise_for_status`` raises HTTPError(status)."""
+    resp = MagicMock()
+    resp.status_code = status
+    resp.raise_for_status.side_effect = requests.exceptions.HTTPError(
+        f"{status} error", response=resp)
+    resp.headers = {}
+    resp.close.return_value = None
+    return resp
+
 
 class TestTatoebaData(unittest.TestCase):
     def setUp(self):
@@ -436,6 +465,108 @@ class TestTatoebaData(unittest.TestCase):
 
         self.assertEqual(mock_dl_bz2.call_count, 3)
         mock_audio_ids.assert_called_once_with(tatoeba_data.AUDIO_INDEX_URL)
+
+    # ── download_to_file tests (streaming plan step 1) ─────────────
+
+    def test_download_to_file_writes_exact_bytes(self):
+        """download_to_file streams multiple chunks and writes exact bytes to dest."""
+        payload = bytes(range(256)) * 8  # 2048 bytes
+        resp = _streaming_response(payload, chunk=17)
+        dest = os.path.join(self.temp_dir, "out.tsv.bz2")
+
+        with patch("src.core.tatoeba_data.requests.get", return_value=resp) as mg:
+            tatoeba_data.download_to_file("https://example.org/x.bz2", dest)
+
+        self.assertEqual(mg.call_count, 1)
+        self.assertTrue(os.path.exists(dest))
+        with open(dest, "rb") as f:
+            self.assertEqual(f.read(), payload)
+        # No partial file may linger after success.
+        self.assertFalse(os.path.exists(dest + ".part"))
+
+    def test_download_to_file_verifies_content_length(self):
+        """When Content-Length matches the received bytes, the download succeeds."""
+        payload = b"hello tatoeba\n" * 50
+        resp = _streaming_response(
+            payload, headers={"Content-Length": str(len(payload))})
+        dest = os.path.join(self.temp_dir, "cl_ok.tsv.bz2")
+
+        with patch("src.core.tatoeba_data.requests.get", return_value=resp):
+            tatoeba_data.download_to_file("https://example.org/x.bz2", dest)
+
+        with open(dest, "rb") as f:
+            self.assertEqual(f.read(), payload)
+
+    def test_download_to_file_truncation_raises_and_retries(self):
+        """A Content-Length mismatch raises ConnectionError, is retried, then fails.
+
+        ConnectionError is a retriable condition, so all three attempts run before
+        the error surfaces; the partial ``.part`` file must be cleaned up.
+        """
+        payload = b"only eleven"  # 11 bytes
+        resp = _streaming_response(
+            payload, headers={"Content-Length": "999"})  # claims 999 → mismatch
+        dest = os.path.join(self.temp_dir, "trunc.tsv.bz2")
+
+        with patch("src.core.tatoeba_data.requests.get", return_value=resp) as mg, \
+             patch("src.core.tatoeba_data.DOWNLOAD_RETRY_BACKOFF", (0, 0)):
+            with self.assertRaises(requests.exceptions.ConnectionError):
+                tatoeba_data.download_to_file("https://example.org/x.bz2", dest)
+
+        self.assertEqual(mg.call_count, 3)
+        self.assertFalse(os.path.exists(dest))
+        self.assertFalse(os.path.exists(dest + ".part"))
+
+    def test_download_to_file_retries_on_500_then_succeeds(self):
+        """A 500 response is retried and a following 200 succeeds."""
+        err = _error_response(500)
+        ok = _streaming_response(b"good bytes")
+        dest = os.path.join(self.temp_dir, "five00.tsv.bz2")
+
+        with patch("src.core.tatoeba_data.requests.get", side_effect=[err, ok]) as mg, \
+             patch("src.core.tatoeba_data.DOWNLOAD_RETRY_BACKOFF", (0,)):
+            tatoeba_data.download_to_file("https://example.org/x.bz2", dest)
+
+        self.assertEqual(mg.call_count, 2)
+        with open(dest, "rb") as f:
+            self.assertEqual(f.read(), b"good bytes")
+
+    def test_download_to_file_retries_on_timeout_then_succeeds(self):
+        """A read Timeout during streaming is retried, then the next attempt succeeds."""
+        bad = MagicMock()
+        bad.status_code = 200
+        bad.raise_for_status.return_value = None
+        bad.headers = {}
+        bad.iter_content.side_effect = lambda *a, **k: (_ for _ in ()).throw(
+            requests.exceptions.ReadTimeout("read timed out"))
+        bad.close.return_value = None
+
+        ok = _streaming_response(b"good bytes")
+        dest = os.path.join(self.temp_dir, "timeout.tsv.bz2")
+
+        with patch("src.core.tatoeba_data.requests.get", side_effect=[bad, bad, ok]) as mg, \
+             patch("src.core.tatoeba_data.DOWNLOAD_RETRY_BACKOFF", (0, 0)):
+            tatoeba_data.download_to_file("https://example.org/x.bz2", dest)
+
+        self.assertEqual(mg.call_count, 3)
+        with open(dest, "rb") as f:
+            self.assertEqual(f.read(), b"good bytes")
+        bad.close.assert_called()
+        self.assertFalse(os.path.exists(dest + ".part"))
+
+    def test_download_to_file_no_retry_on_404(self):
+        """A 404 is never retried and raises HTTPError immediately."""
+        err = _error_response(404)
+        dest = os.path.join(self.temp_dir, "notfound.tsv.bz2")
+
+        with patch("src.core.tatoeba_data.requests.get", return_value=err) as mg, \
+             patch("src.core.tatoeba_data.DOWNLOAD_RETRY_BACKOFF", (0, 0)):
+            with self.assertRaises(requests.exceptions.HTTPError):
+                tatoeba_data.download_to_file("https://example.org/x.bz2", dest)
+
+        self.assertEqual(mg.call_count, 1)
+        self.assertFalse(os.path.exists(dest))
+        self.assertFalse(os.path.exists(dest + ".part"))
 
 
 if __name__ == '__main__':
