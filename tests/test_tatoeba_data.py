@@ -6,6 +6,8 @@ import tempfile
 import json
 import datetime
 import bz2
+import io
+import tarfile
 import requests
 
 # Mock aqt before importing our module
@@ -45,6 +47,22 @@ def _error_response(status):
     resp.headers = {}
     resp.close.return_value = None
     return resp
+
+
+def _write_bz2(path, text):
+    """Compress ``text`` (utf-8, newlines preserved) into a .bz2 file at ``path``."""
+    with bz2.open(path, "wb") as f:
+        f.write(text.encode("utf-8"))
+
+
+def _write_tar_bz2(path, members):
+    """Build a tar.bz2 archive at ``path`` from a {filename: content_str} dict."""
+    with tarfile.open(path, "w:bz2") as tar:
+        for name, content in members.items():
+            data = content.encode("utf-8")
+            info = tarfile.TarInfo(name=name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
 
 
 class TestTatoebaData(unittest.TestCase):
@@ -567,6 +585,189 @@ class TestTatoebaData(unittest.TestCase):
         self.assertEqual(mg.call_count, 1)
         self.assertFalse(os.path.exists(dest))
         self.assertFalse(os.path.exists(dest + ".part"))
+
+    # ── staging import tests (streaming plan step 2) ───────────────
+
+    def _new_staging_db(self):
+        """Create a staging DB in the temp dir and return (conn, db_path)."""
+        db_path = os.path.join(self.temp_dir, "staging.db")
+        conn = tatoeba_data._create_staging_db(db_path)
+        return conn, db_path
+
+    def test_create_staging_db_schema(self):
+        """_create_staging_db builds jpn/target/links/audio tables, all empty."""
+        conn, db_path = self._new_staging_db()
+        try:
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            self.assertEqual(tables, {"jpn", "target", "links", "audio"})
+            for t in ("jpn", "target", "links", "audio"):
+                self.assertEqual(conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0], 0)
+        finally:
+            conn.close()
+        self.assertTrue(os.path.exists(db_path))
+
+    def test_import_sentences_writes_rows(self):
+        """_import_sentences streams a bz2 sentence file into the jpn table."""
+        fixture = "1\tjpn\t猫が好き\n2\tjpn\t犬が好き\n3\tjpn\t鳥が好き\n"
+        path = os.path.join(self.temp_dir, "jpn.tsv.bz2")
+        _write_bz2(path, fixture)
+
+        conn, _ = self._new_staging_db()
+        try:
+            tatoeba_data._import_sentences(path, conn, "jpn")
+            rows = dict(conn.execute("SELECT id, text FROM jpn ORDER BY id").fetchall())
+            self.assertEqual(rows, {"1": "猫が好き", "2": "犬が好き", "3": "鳥が好き"})
+        finally:
+            conn.close()
+
+    def test_import_sentences_duplicate_id_last_wins(self):
+        """Duplicate sentence ids resolve last-wins via INSERT OR REPLACE."""
+        fixture = "1\tjpn\t猫\n1\tjpn\t犬\n"  # id collision: 猫 then 犬
+        path = os.path.join(self.temp_dir, "dup.tsv.bz2")
+        _write_bz2(path, fixture)
+
+        conn, _ = self._new_staging_db()
+        try:
+            tatoeba_data._import_sentences(path, conn, "jpn")
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM jpn").fetchone()[0], 1)
+            self.assertEqual(conn.execute("SELECT text FROM jpn").fetchone()[0], "犬")
+        finally:
+            conn.close()
+
+    def test_import_sentences_skips_short_lines(self):
+        """Lines with fewer than 3 tab columns and empty lines are skipped."""
+        fixture = "1\tjpn\n\nx\n2\tjpn\t犬\n"  # '1\tjpn'(2 cols), empty, 'x'(1 col) skipped
+        path = os.path.join(self.temp_dir, "short.tsv.bz2")
+        _write_bz2(path, fixture)
+
+        conn, _ = self._new_staging_db()
+        try:
+            tatoeba_data._import_sentences(path, conn, "jpn")
+            rows = dict(conn.execute("SELECT id, text FROM jpn").fetchall())
+            self.assertEqual(rows, {"2": "犬"})
+        finally:
+            conn.close()
+
+    def test_import_sentences_target_table(self):
+        """_import_sentences writes to the target table when asked."""
+        fixture = "100\teng\tI like cats\n101\teng\tI like dogs\n"
+        path = os.path.join(self.temp_dir, "eng.tsv.bz2")
+        _write_bz2(path, fixture)
+
+        conn, _ = self._new_staging_db()
+        try:
+            tatoeba_data._import_sentences(path, conn, "target")
+            rows = dict(conn.execute("SELECT id, text FROM target ORDER BY id").fetchall())
+            self.assertEqual(rows, {"100": "I like cats", "101": "I like dogs"})
+            # jpn table must remain untouched
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM jpn").fetchone()[0], 0)
+        finally:
+            conn.close()
+
+    def test_import_sentences_rejects_bad_table(self):
+        """A table name other than jpn/target raises ValueError (guards SQL interp)."""
+        path = os.path.join(self.temp_dir, "bad.tsv.bz2")
+        _write_bz2(path, "1\tjpn\t猫\n")
+        conn, _ = self._new_staging_db()
+        try:
+            with self.assertRaises(ValueError):
+                tatoeba_data._import_sentences(path, conn, "links")
+        finally:
+            conn.close()
+
+    def test_import_sentences_empty_input(self):
+        """An empty bz2 imports successfully with zero rows (parity with today)."""
+        path = os.path.join(self.temp_dir, "empty.tsv.bz2")
+        _write_bz2(path, "")
+        conn, _ = self._new_staging_db()
+        try:
+            tatoeba_data._import_sentences(path, conn, "jpn")
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM jpn").fetchone()[0], 0)
+        finally:
+            conn.close()
+
+    def test_import_links_preserves_duplicates(self):
+        """Duplicate link rows are kept (no PK/no dedup) so the join duplicates them."""
+        fixture = "1\t100\n1\t100\n2\t101\n"  # 1->100 duplicated
+        path = os.path.join(self.temp_dir, "links.tsv.bz2")
+        _write_bz2(path, fixture)
+
+        conn, _ = self._new_staging_db()
+        try:
+            tatoeba_data._import_links(path, conn)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM links").fetchone()[0], 3)
+            rows = conn.execute("SELECT jpn_id, target_id FROM links ORDER BY rowid").fetchall()
+            self.assertEqual(rows, [("1", "100"), ("1", "100"), ("2", "101")])
+        finally:
+            conn.close()
+
+    def test_import_links_skips_short_and_empty(self):
+        """Empty lines and lines with fewer than 2 tab columns are skipped."""
+        fixture = "1\t100\n\nx\n2\t101\n"  # empty and 'x' skipped
+        path = os.path.join(self.temp_dir, "links_partial.tsv.bz2")
+        _write_bz2(path, fixture)
+
+        conn, _ = self._new_staging_db()
+        try:
+            tatoeba_data._import_links(path, conn)
+            rows = conn.execute("SELECT jpn_id, target_id FROM links").fetchall()
+            self.assertEqual(rows, [("1", "100"), ("2", "101")])
+        finally:
+            conn.close()
+
+    def test_import_audio_digit_filter(self):
+        """Only the first column is kept when it is all digits; non-digits skipped."""
+        member = "42\ttag\nabc\n1337\tcontent\n\n"
+        path = os.path.join(self.temp_dir, "audio.tar.bz2")
+        _write_tar_bz2(path, {"sentences_with_audio.csv": member})
+
+        conn, _ = self._new_staging_db()
+        try:
+            tatoeba_data._import_audio(path, conn)
+            ids = {r[0] for r in conn.execute("SELECT id FROM audio").fetchall()}
+            self.assertEqual(ids, {"42", "1337"})
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM audio").fetchone()[0], 2)
+        finally:
+            conn.close()
+
+    def test_import_audio_multiple_members_and_dedup(self):
+        """All tar members are read and duplicate ids dedup via the PRIMARY KEY."""
+        members = {
+            "a.csv": "10\ttag\n20\ttag\n",
+            "b.csv": "20\ttag\n30\ttag\n",  # 20 duplicates across members
+        }
+        path = os.path.join(self.temp_dir, "audio_multi.tar.bz2")
+        _write_tar_bz2(path, members)
+
+        conn, _ = self._new_staging_db()
+        try:
+            tatoeba_data._import_audio(path, conn)
+            ids = {r[0] for r in conn.execute("SELECT id FROM audio").fetchall()}
+            self.assertEqual(ids, {"10", "20", "30"})
+        finally:
+            conn.close()
+
+    def test_import_sentences_truncated_bz2_raises(self):
+        """A truncated .bz2 stream surfaces EOFError/OSError (clean error parity, D2).
+
+        Because the helper commits only after a full successful import, the
+        uncommitted transaction is rolled back on close — no partial rows leak
+        into the staging table.
+        """
+        data = bz2.compress("1\tjpn\t猫\n2\tjpn\t犬\n3\tjpn\t鳥\n".encode("utf-8"))
+        path = os.path.join(self.temp_dir, "trunct.tsv.bz2")
+        with open(path, "wb") as f:
+            f.write(data[:-8])  # cut the tail of the bz2 stream
+
+        conn, _ = self._new_staging_db()
+        try:
+            with self.assertRaises((EOFError, OSError)):
+                tatoeba_data._import_sentences(path, conn, "jpn")
+            # No partial import survived (transaction rolled back on the exception path).
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM jpn").fetchone()[0], 0)
+        finally:
+            conn.close()
 
 
 if __name__ == '__main__':

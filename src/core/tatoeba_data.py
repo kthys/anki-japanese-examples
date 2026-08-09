@@ -53,6 +53,11 @@ _RETRIABLE_EXC = (
     requests.exceptions.ChunkedEncodingError,
 )
 
+# Rows buffered before each staging-table executemany flush. Chosen to bound a
+# single insert batch in memory while amortizing per-statement overhead for
+# the ~4 M-row worst-case (eng) import.
+STAGING_CHUNK_SIZE = 5000
+
 # Regex pattern for tokenizing Japanese text: matches runs of kanji, katakana, or hiragana
 _TOKEN_RE = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf]+|[\u30a0-\u30ff]+|[\u3040-\u309f]+')
 
@@ -374,6 +379,176 @@ def download_to_file(url: str, dest_path: str, chunk_size: int = 1 << 16) -> Non
                 os.remove(part_path)
             except OSError:
                 logging.warning("download_to_file: could not remove %s", part_path)
+
+
+def _create_staging_db(db_path: str) -> sqlite3.Connection:
+    """Create the per-run staging SQLite DB with four tables and bulk-load pragmas.
+
+    Tables (streaming plan, decision D4) mirror today's dict semantics exactly:
+
+      - ``jpn(id TEXT PRIMARY KEY, text TEXT)``     last-wins on duplicate ids
+      - ``target(id TEXT PRIMARY KEY, text TEXT)``   same
+      - ``links(jpn_id TEXT, target_id TEXT)``        NO primary key, no dedup —
+                                                    duplicate link rows are
+                                                    preserved so the join emits
+                                                    duplicate output rows
+      - ``audio(id TEXT PRIMARY KEY)``               replaces the ~100 MB in-RAM set
+
+    Both sentence tables use ``id TEXT PRIMARY KEY`` so an ``INSERT OR REPLACE``
+    import makes duplicate sentence ids resolve last-wins, matching today's
+    ``jpn_dict[parts[0]] = parts[2]``. A truncated ``.bz2`` surfaces here as an
+    ``EOFError``/``OSError`` from :func:`_import_sentences` (decision D2) — no
+    decompressed temp file is ever written.
+
+    The pragmas trade durability for speed (``synchronous=OFF``,
+    ``journal_mode=OFF``): the staging DB lives in a throwaway workdir that is
+    ``rmtree``-d on failure, so crash-safety is irrelevant and one transaction
+    per table is all that matters (plan §5 C6).
+
+    Args:
+        db_path: Path to create the staging DB at. Parent directory must exist.
+
+    Returns:
+        An open ``sqlite3.Connection``; the caller owns its lifecycle (close
+        it in a ``finally`` — a connection closed with an uncommitted
+        transaction rolls back, so a failed import never persists partial rows).
+    """
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute("PRAGMA synchronous = OFF")
+    cur.execute("PRAGMA journal_mode = OFF")
+    cur.execute("CREATE TABLE jpn (id TEXT PRIMARY KEY, text TEXT)")
+    cur.execute("CREATE TABLE target (id TEXT PRIMARY KEY, text TEXT)")
+    cur.execute("CREATE TABLE links (jpn_id TEXT, target_id TEXT)")
+    cur.execute("CREATE TABLE audio (id TEXT PRIMARY KEY)")
+    conn.commit()
+    return conn
+
+
+def _import_sentences(compressed_path: str, conn: sqlite3.Connection, table: str) -> None:
+    """Import a Tatoeba ``*_sentences.tsv.bz2`` file into the ``jpn`` or ``target``
+    staging table.
+
+    Iterates :class:`bz2.BZ2File` line-by-line straight into SQLite, so the
+    ~1.5 GB decompressed corpus is never materialized as a file or string —
+    peak memory is bounded by ``STAGING_CHUNK_SIZE`` rows (decision D2).
+
+    Parity with today's ``build_pairs_tsv``:
+      - a line with fewer than 3 tab columns is skipped (``len(parts) < 3``);
+      - empty lines are skipped;
+      - ``id = parts[0]`` and ``text = parts[2]``;
+      - duplicate sentence ids resolve last-wins via ``INSERT OR REPLACE``
+        (matching ``jpn_dict[parts[0]] = parts[2]``).
+
+    Only the trailing ``\n`` is stripped (``rstrip("\n")``) so any carriage
+    return from a ``\r\n`` file is preserved in ``text`` exactly as today,
+    which relies on a whole-content ``strip()`` + ``split("\n")``.
+
+    Args:
+        compressed_path: Path to a ``.tsv.bz2`` sentence file.
+        conn: A connection to a staging DB created by :func:`_create_staging_db`.
+        table: ``"jpn"`` or ``"target"``.
+
+    Raises:
+        ValueError: if ``table`` is not one of the two allowed names.
+        EOFError/OSError: if the ``.bz2`` stream is truncated or corrupt
+            (surfaced to the caller for a clean error message).
+    """
+    if table not in ("jpn", "target"):
+        raise ValueError(f"_import_sentences: table must be 'jpn' or 'target', got {table!r}")
+    cur = conn.cursor()
+    insert_sql = f"INSERT OR REPLACE INTO {table} (id, text) VALUES (?, ?)"
+    chunk: list[tuple[str, str]] = []
+    with bz2.BZ2File(compressed_path) as f:
+        for raw in f:
+            line = raw.decode("utf-8").rstrip("\n")
+            if not line:
+                continue
+            parts = line.split("\t")
+            if len(parts) < 3:
+                continue
+            chunk.append((parts[0], parts[2]))
+            if len(chunk) >= STAGING_CHUNK_SIZE:
+                cur.executemany(insert_sql, chunk)
+                chunk.clear()
+    if chunk:
+        cur.executemany(insert_sql, chunk)
+    conn.commit()
+
+
+def _import_links(compressed_path: str, conn: sqlite3.Connection) -> None:
+    """Import a Tatoeba ``jpn-<lang>_links.tsv.bz2`` file into the ``links`` table.
+
+    The ``links`` table has **no primary key and no deduplication** (decision
+    D4): a duplicate link row today produces a duplicate output row, and the
+    join in :func:`download_tatoeba_data` must preserve that exactly.
+
+    Parity with today's ``build_pairs_tsv``:
+      - empty lines are skipped;
+      - a line with fewer than 2 tab columns is skipped (``len(parts) < 2``);
+      - ``jpn_id = parts[0]`` and ``target_id = parts[1]``.
+
+    Args:
+        compressed_path: Path to a ``.tsv.bz2`` links file.
+        conn: A connection to a staging DB created by :func:`_create_staging_db`.
+    """
+    cur = conn.cursor()
+    insert_sql = "INSERT INTO links (jpn_id, target_id) VALUES (?, ?)"
+    chunk: list[tuple[str, str]] = []
+    with bz2.BZ2File(compressed_path) as f:
+        for raw in f:
+            line = raw.decode("utf-8").rstrip("\n")
+            if not line:
+                continue
+            parts = line.split("\t")
+            if len(parts) < 2:
+                continue
+            chunk.append((parts[0], parts[1]))
+            if len(chunk) >= STAGING_CHUNK_SIZE:
+                cur.executemany(insert_sql, chunk)
+                chunk.clear()
+    if chunk:
+        cur.executemany(insert_sql, chunk)
+    conn.commit()
+
+
+def _import_audio(tar_compressed_path: str, conn: sqlite3.Connection) -> None:
+    """Import ``sentences_with_audio.tar.bz2`` into the ``audio`` staging table.
+
+    Streams each tar member line-by-line so the audio index (≈1.5 M ids) is
+    never held in RAM as a Python set (decision D3). The parse rule is
+    byte-identical to today's :func:`download_audio_ids`: every member is read,
+    each line is fully stripped, and the first tab-separated column is kept as
+    an audio id only when it is all digits (``parts[0].isdigit()``).
+
+    ``INSERT OR REPLACE`` into ``audio(id PRIMARY KEY)`` dedups ids exactly as
+    today's ``set.add`` did.
+
+    Args:
+        tar_compressed_path: Path to a downloaded ``sentences_with_audio.tar.bz2``.
+        conn: A connection to a staging DB created by :func:`_create_staging_db`.
+    """
+    cur = conn.cursor()
+    insert_sql = "INSERT OR REPLACE INTO audio (id) VALUES (?)"
+    chunk: list[tuple[str]] = []
+    with tarfile.open(tar_compressed_path, mode="r:bz2") as tar:
+        for member in tar.getmembers():
+            extracted = tar.extractfile(member)
+            if extracted is None:
+                continue
+            for raw in extracted:
+                line = raw.decode("utf-8").strip()
+                if not line:
+                    continue
+                parts = line.split("\t")
+                if parts and parts[0].isdigit():
+                    chunk.append((parts[0],))
+                    if len(chunk) >= STAGING_CHUNK_SIZE:
+                        cur.executemany(insert_sql, chunk)
+                        chunk.clear()
+    if chunk:
+        cur.executemany(insert_sql, chunk)
+    conn.commit()
 
 
 def download_and_extract_bz2(url: str) -> str:
