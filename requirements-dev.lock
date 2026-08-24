@@ -1,0 +1,25 @@
+# Locked dependencies for CI/CD security
+# All packages are pinned to exact versions to prevent supply-chain attacks
+# during CI/CD runs by ensuring immutable dependency resolution.
+#
+# To update this file:
+#   1. Review and update version numbers below
+#   2. Verify package integrity from PyPI or use: pip-compile --generate-hashes
+#   3. Test in a clean environment before committing
+#
+# Security: Exact version pinning prevents malicious package updates from
+# being automatically pulled during CI runs.
+
+# Direct dependencies
+requests==2.31.0
+PyQt6==6.6.1
+PyQt6-Qt6==6.6.1
+PyQt6-sip==13.6.0
+responses==0.25.0
+
+# Transitive dependencies (explicitly pinned)
+certifi==2024.2.2
+charset-normalizer==3.3.2
+idna==3.6
+urllib3==2.2.1
+pyyaml==6.0.1
