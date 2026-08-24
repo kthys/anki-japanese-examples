@@ -101,8 +101,12 @@ def fetch_audio_to_temp(jpn_id: str) -> "str | None":
 
     tmp_dir = tempfile.mkdtemp()
     tmp_path = os.path.join(tmp_dir, f"{jpn_id}.mp3")
+    base_real = os.path.realpath(tmp_dir)
+    target_real = os.path.realpath(tmp_path)
+    if os.path.commonpath([base_real, target_real]) != base_real:
+        raise Exception("Invalid file path")
     try:
-        with open(tmp_path, "wb") as tmp:
+        with open(target_real, "wb") as tmp:
             tmp.write(response.content)
     except OSError:
         cleanup_temp_audio(tmp_path)
