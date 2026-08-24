@@ -19,11 +19,23 @@ jobs:
 
       - name: Get version from tag
         id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+        run: |
+          # Extract version from tag
+          VERSION="${GITHUB_REF#refs/tags/}"
+          
+          # Validate version format to prevent command injection
+          # Only allow: v followed by digits, dots, hyphens, and alphanumeric characters
+          if ! echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$'; then
+            echo "Error: Invalid version format '$VERSION'. Expected format: vX.Y.Z or vX.Y.Z-prerelease"
+            exit 1
+          fi
+          
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Build .ankiaddon file
         run: |
-          zip -r japanese-examples-${{ env.VERSION }}.ankiaddon * -x "*.git*" "*.github*" ".gitignore" "README.md" "screenshots/*" "*__pycache__*" "*.pyc" "*.DS_Store" "tests/*" "requirements-dev.txt"
+          # Use quoted variable to prevent command injection
+          zip -r "japanese-examples-${VERSION}.ankiaddon" * -x "*.git*" "*.github*" ".gitignore" "README.md" "screenshots/*" "*__pycache__*" "*.pyc" "*.DS_Store" "tests/*" "requirements-dev.txt"
 
       - name: Create Release
         id: create_release
