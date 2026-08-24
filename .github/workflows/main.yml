@@ -10,12 +10,38 @@ permissions: {}
 jobs:
   build_and_release:
     runs-on: ubuntu-latest
+    # Require manual approval via environment protection rules
+    # Configure this environment in repository settings with required reviewers
+    environment: release
     permissions:
       contents: write
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # Fetch full history to verify branch ancestry
+          fetch-depth: 0
+
+      - name: Verify tag is on default branch
+        run: |
+          # Security check: Ensure the tagged commit is reachable from the default branch
+          # This prevents unauthorized releases from arbitrary commits
+          DEFAULT_BRANCH=$(git remote show origin | grep 'HEAD branch' | cut -d' ' -f5)
+          TAG_COMMIT=$(git rev-parse HEAD)
+          
+          # Check if the tag commit is an ancestor of or on the default branch
+          if ! git merge-base --is-ancestor "$TAG_COMMIT" "origin/$DEFAULT_BRANCH" 2>/dev/null; then
+            # If not an ancestor, check if it IS the branch head or reachable from it
+            if ! git branch -r --contains "$TAG_COMMIT" | grep -q "origin/$DEFAULT_BRANCH"; then
+              echo "ERROR: Tag must point to a commit on the $DEFAULT_BRANCH branch"
+              echo "Tagged commit: $TAG_COMMIT"
+              echo "Default branch: $DEFAULT_BRANCH"
+              exit 1
+            fi
+          fi
+          
+          echo "✓ Tag verified: commit is on $DEFAULT_BRANCH branch"
 
       - name: Get version from tag
         id: get_version
