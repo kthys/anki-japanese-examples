@@ -9,71 +9,75 @@ on:
         type: string
 
 permissions: {}
-  
+
 jobs:
   build_and_release:
     runs-on: ubuntu-latest
+    # Human approval gate (release environment): the run pauses until the
+    # required reviewer approves in the GitHub UI. 
+    environment: release
     permissions:
       contents: write
-    
+    concurrency:
+      group: release-${{ github.event.inputs.tag }}
+      cancel-in-progress: false
+
     steps:
       - name: Validate input tag format
+        env:
+          TAG: ${{ github.event.inputs.tag }}
         run: |
-          TAG="${{ github.event.inputs.tag }}"
-          
-          # Validate version format to prevent command injection
-          # Only allow: v followed by digits, dots, hyphens, and alphanumeric characters
-          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$'; then
+          # Bash full-string ERE match: also rejects embedded newlines
+          # (API-dispatched inputs can contain them). The value only ever
+          # reaches the shell as an env var, never via string interpolation.
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$ ]]; then
             echo "Error: Invalid version format '$TAG'. Expected format: vX.Y.Z or vX.Y.Z-prerelease"
             exit 1
           fi
-          
           echo "VERSION=$TAG" >> $GITHUB_ENV
           echo "✓ Tag format validated: $TAG"
+
+      - name: Verify tag exists in repository
+        env:
+          TAG: ${{ github.event.inputs.tag }}
+        run: |
+          if ! git ls-remote --exit-code "https://github.com/${{ github.repository }}.git" "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "ERROR: Tag '$TAG' does not exist in the repository"
+            exit 1
+          fi
+          echo "✓ Tag exists: $TAG"
 
       - name: Checkout code at tag
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
         with:
           ref: ${{ github.event.inputs.tag }}
-          # Fetch full history to verify branch ancestry and tag signatures
+          # Full history needed for branch-ancestry and signature checks
           fetch-depth: 0
 
-      - name: Verify tag exists and is signed (if available)
+      - name: Verify tag signature (best effort / advisory)
+        env:
+          TAG: ${{ github.event.inputs.tag }}
         run: |
-          TAG="${{ github.event.inputs.tag }}"
-          
-          # Verify the tag exists
-          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "ERROR: Tag '$TAG' does not exist in the repository"
-            exit 1
-          fi
-          
-          echo "✓ Tag exists: $TAG"
-          
-          # Check if the tag is signed (GPG or SSH signature)
-          # This is a best-effort check - if signing is not configured, we continue
-          # but log the status for audit purposes
           if git verify-tag "$TAG" 2>/dev/null; then
             echo "✓ Tag is cryptographically signed and verified"
           else
             echo "⚠ Warning: Tag is not signed or signature could not be verified"
-            echo "  For enhanced security, consider requiring signed tags"
+            echo "  (no signing keys are imported on the runner — advisory only)"
           fi
 
       - name: Verify tag is on default branch
+        env:
+          TAG: ${{ github.event.inputs.tag }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          TAG="${{ github.event.inputs.tag }}"
-          
-          # Security check: Ensure the tagged commit is reachable from the default branch
-          # This prevents unauthorized releases from arbitrary commits
-          DEFAULT_BRANCH=$(git remote show origin | grep 'HEAD branch' | cut -d' ' -f5)
+          echo "Default branch: $DEFAULT_BRANCH"
+          if ! git rev-parse --verify "refs/remotes/origin/$DEFAULT_BRANCH" >/dev/null 2>&1; then
+            echo "ERROR: remote branch origin/$DEFAULT_BRANCH not found"
+            exit 1
+          fi
           TAG_COMMIT=$(git rev-parse "$TAG^{commit}")
-          
           echo "Verifying tag '$TAG' (commit: $TAG_COMMIT) is on branch '$DEFAULT_BRANCH'"
-          
-          # Check if the tag commit is an ancestor of or on the default branch
           if ! git merge-base --is-ancestor "$TAG_COMMIT" "origin/$DEFAULT_BRANCH" 2>/dev/null; then
-            # If not an ancestor, check if it IS the branch head or reachable from it
             if ! git branch -r --contains "$TAG_COMMIT" | grep -q "origin/$DEFAULT_BRANCH"; then
               echo "ERROR: Tag must point to a commit on the $DEFAULT_BRANCH branch"
               echo "Tagged commit: $TAG_COMMIT"
@@ -81,33 +85,25 @@ jobs:
               exit 1
             fi
           fi
-          
           echo "✓ Tag verified: commit is on $DEFAULT_BRANCH branch"
 
-      - name: Verify authorized actor
+      - name: Log release actor (audit trail)
         run: |
-          ACTOR="${{ github.actor }}"
-          
-          # Log the actor for audit trail
-          echo "Release triggered by: $ACTOR"
+          echo "Release triggered by: ${{ github.actor }}"
           echo "Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          
-          # Note: This workflow uses workflow_dispatch which requires write access to the repository.
-          # Only users with write access or higher can trigger this workflow.
-          # For additional restrictions, configure branch protection rules and required reviewers
-          # on the default branch to control who can merge commits that will be tagged and released.
-          
-          echo "✓ Actor verified: $ACTOR has write access to trigger this workflow"
 
       - name: Build .ankiaddon file
         run: |
-          # Use quoted variable to prevent command injection
+          # Quoted variable, value already validated (vX.Y.Z[-prerelease])
           zip -r "japanese-examples-${VERSION}.ankiaddon" * -x "*.git*" "*.github*" ".gitignore" "README.md" "screenshots/*" "*__pycache__*" "*.pyc" "*.DS_Store" "tests/*" "requirements-dev.txt"
 
       - name: Create Release
-        id: create_release
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
+          # REQUIRED with workflow_dispatch: github.ref is the branch, not the
+          # tag — without tag_name the release would be created on a tag named
+          # like the branch (e.g. "main") instead of vX.Y.Z.
+          tag_name: ${{ env.VERSION }}
           files: ./japanese-examples-${{ env.VERSION }}.ankiaddon
           name: ${{ env.VERSION }}
           draft: false
