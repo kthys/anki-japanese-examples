@@ -69,7 +69,9 @@ Yes, for two things: single-card additions query the Tatoeba API live, and batch
 
 ### How much disk space do the downloaded datasets take, and where are they stored?
 
-Batch mode downloads per-language Tatoeba sentence exports and builds a local SQLite index. Everything is stored in the `user_files/` folder inside the add-on directory (roughly a few hundred MB per language). You can delete a language's files at any time to free space — the batch dialog will simply ask you to re-download them.
+Batch mode downloads the per-language Tatoeba sentence exports and builds a local SQLite search index from them. Each language is stored as a single file — `jpn_<lang>_index.db` — inside the add-on's `user_files/` folder (a few hundred MB per language). To free space you can delete a language's `jpn_<lang>_index.db` directly; the batch dialog will then simply ask you to re-download it.
+
+During a download the importer also needs transient free space for the compressed exports and a throwaway build directory (peak usage can reach a few GB for the largest languages), but these are cleaned up automatically once the build finishes, leaving only the finished index behind.
 
 ### Why is audio missing for some sentences?
 

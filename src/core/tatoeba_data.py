@@ -1,6 +1,5 @@
 import os
 import bz2
-import io
 import tarfile
 import logging
 import requests
@@ -9,7 +8,9 @@ import json
 import sqlite3
 import re
 import time
-from typing import Optional
+import shutil
+import tempfile
+from typing import Optional, Iterable
 
 try:
     from aqt import mw
@@ -43,6 +44,13 @@ METADATA_FILE = os.path.join(USER_FILES_DIR, "metadata.json")
 # this to (0, 0) to avoid real sleeps.
 DOWNLOAD_RETRY_BACKOFF = (1.0, 4.0)
 
+# Per-run workdir prefix for download_tatoeba_data (streaming plan D6): unique
+# per run so overlapping builds of the same language never share intermediates.
+WORKDIR_PREFIX = "download_"
+# Crash-recovery sweep: download_* workdirs older than this are removed at the
+# start of the next download (a legit run can take 30+ min, so 1 h is generous).
+WORKDIR_MAX_AGE_SECONDS = 3600
+
 # Transient conditions download_to_file retries: connection drops, timeouts,
 # chunked-encoding failures, and incomplete reads (a Content-Length mismatch
 # is raised as ConnectionError so it lands here too). HTTP 5xx is retried as
@@ -60,18 +68,6 @@ STAGING_CHUNK_SIZE = 5000
 
 # Regex pattern for tokenizing Japanese text: matches runs of kanji, katakana, or hiragana
 _TOKEN_RE = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf]+|[\u30a0-\u30ff]+|[\u3040-\u309f]+')
-
-def get_data_file_path(lang_code: str) -> str:
-    """
-    Returns the path to the processed TSV file.
-
-    Args:
-    - lang_code (str): The ISO 639-3 language code.
-
-    Returns:
-    - The absolute string path to the processed TSV file.
-    """
-    return os.path.join(USER_FILES_DIR, f"jpn_{lang_code}_pairs.tsv")
 
 def get_db_path(lang_code: str) -> str:
     """
@@ -101,12 +97,18 @@ def tokenize_japanese(text: str) -> list[str]:
     """
     return list(dict.fromkeys(_TOKEN_RE.findall(text)))
 
-def build_sqlite_index(pairs_tsv_path: str, db_path: str, audio_ids: "set[str] | None" = None) -> int:
+def build_sqlite_index(rows: Iterable[tuple], db_path: str) -> int:
     """
-    Build a SQLite index database from a pairs TSV file.
+    Build a SQLite index database from an iterable of sentence-pair rows.
+
+    ``rows`` yields 5-tuples ``(jpn_id, jpn_text, trans_id, trans_text,
+    has_audio)`` — exactly the shape produced by the staging SQL join in
+    :func:`download_tatoeba_data` (streaming plan decision D5). ``has_audio``
+    is supplied per row by the caller (the join's ``LEFT JOIN audio``), so this
+    function no longer takes an ``audio_ids`` set; it coerces the value to 0/1.
 
     Creates two tables:
-      - ``sentences`` — stores (jpn_id, jpn_text, trans_id, trans_text)
+      - ``sentences`` — stores (jpn_id, jpn_text, trans_id, trans_text, has_audio)
       - ``words``     — maps each token to the sentence row id for fast lookup
 
     An index is created on ``words(word)`` to enable efficient exact-match queries.
@@ -115,12 +117,21 @@ def build_sqlite_index(pairs_tsv_path: str, db_path: str, audio_ids: "set[str] |
     onto ``db_path`` only after the final commit, so ``db_path`` always holds
     either the previous complete index or the new one — never a partial file.
 
+    Tokenization, the chunked ``executemany`` flush, the explicit sequential
+    sentence ids, and the ``synchronous=OFF / journal_mode=MEMORY`` pragmas are
+    byte-identical to the previous TSV-reading implementation — the boundary and
+    inflection tests are the regression guards (streaming plan §6).
+
     Args:
-    - pairs_tsv_path (str): Path to the TSV file produced by build_pairs_tsv().
-    - db_path (str): Path where the SQLite database will be created (overwritten if exists).
+        rows: An iterable of 5-tuples ``(jpn_id, jpn_text, trans_id, trans_text,
+            has_audio)``. Consumed exactly once. An exception raised by the
+            iterable aborts the build and leaves the previous ``db_path`` intact
+            (and no ``.tmp`` file behind).
+        db_path: Path where the SQLite database will be created (overwritten if
+            it exists).
 
     Returns:
-    - The number of sentences inserted into the database.
+        The number of sentences inserted into the database.
     """
     tmp_db_path = db_path + ".tmp"
     if os.path.exists(tmp_db_path):
@@ -174,21 +185,16 @@ def build_sqlite_index(pairs_tsv_path: str, db_path: str, audio_ids: "set[str] |
                 )
                 word_rows.clear()
 
-        with open(pairs_tsv_path, "r", encoding="utf-8") as f:
-            for line in f:
-                parts = line.strip().split("\t")
-                if len(parts) < 4:
-                    continue
-                jpn_id, jpn_text, trans_id, trans_text = parts[0], parts[1], parts[2], parts[3]
-                has_audio_val = 1 if audio_ids and jpn_id in audio_ids else 0
-                count += 1
-                sentence_id = count
-                sentence_rows.append(
-                    (sentence_id, jpn_id, jpn_text, trans_id, trans_text, has_audio_val))
-                word_rows.extend(
-                    (token, sentence_id) for token in tokenize_japanese(jpn_text))
-                if len(sentence_rows) >= CHUNK_SIZE:
-                    flush()
+        for jpn_id, jpn_text, trans_id, trans_text, has_audio_val in rows:
+            count += 1
+            sentence_id = count
+            sentence_rows.append(
+                (sentence_id, jpn_id, jpn_text, trans_id, trans_text,
+                 1 if has_audio_val else 0))
+            word_rows.extend(
+                (token, sentence_id) for token in tokenize_japanese(jpn_text))
+            if len(sentence_rows) >= CHUNK_SIZE:
+                flush()
         flush()
 
         cur.execute("CREATE INDEX IF NOT EXISTS idx_words_word ON words(word)")
@@ -209,6 +215,45 @@ def build_sqlite_index(pairs_tsv_path: str, db_path: str, audio_ids: "set[str] |
             except OSError:
                 logging.warning(f"Could not remove temp index {tmp_db_path}")
     return count
+
+
+def _rows_from_tsv(pairs_tsv_path: str, audio_ids: Optional[set] = None) -> Iterable[tuple]:
+    """Yield :func:`build_sqlite_index` 5-tuples by reading a legacy pairs TSV file.
+
+    Test-only bridge adapter (streaming plan decision D5): the generator wrapper
+    that can still feed :func:`build_sqlite_index` from a TSV. It reproduces the
+    exact parsing the old ``build_sqlite_index`` did internally:
+
+      - whole-line ``strip()`` then ``split("\\t")`` (so a trailing ``\\r`` from
+        a ``\\r\\n`` file is stripped, matching prior behavior);
+      - lines with fewer than 4 tab columns are skipped;
+      - ``jpn_id, jpn_text, trans_id, trans_text = parts[0:4]``;
+      - ``has_audio = 1`` iff ``audio_ids`` is truthy and ``jpn_id`` is in it,
+        else ``0`` — identical to the former
+        ``1 if audio_ids and jpn_id in audio_ids else 0``.
+
+    The live :func:`download_tatoeba_data` pipeline now feeds
+    :func:`build_sqlite_index` a staging SQL-join cursor instead; this helper is
+    kept so the boundary/inflection regression tests can build an index from a
+    small TSV fixture without standing up the whole download pipeline.
+
+    Args:
+        pairs_tsv_path: Path to a TSV with one
+            ``jpn_id\\tjpn_text\\ttrans_id\\ttrans_text`` row per line.
+        audio_ids: Optional set/collection of jpn sentence ids that have audio.
+
+    Yields:
+        ``(jpn_id, jpn_text, trans_id, trans_text, has_audio)`` 5-tuples.
+    """
+    with open(pairs_tsv_path, "r", encoding="utf-8") as f:
+        for line in f:
+            parts = line.strip().split("\t")
+            if len(parts) < 4:
+                continue
+            jpn_id, jpn_text, trans_id, trans_text = parts[0], parts[1], parts[2], parts[3]
+            has_audio = 1 if audio_ids and jpn_id in audio_ids else 0
+            yield (jpn_id, jpn_text, trans_id, trans_text, has_audio)
+
 
 def search_word(db_path: str, word: str, conn: Optional[sqlite3.Connection] = None) -> list[tuple[str, str, str, int]]:
     """
@@ -395,7 +440,7 @@ def _create_staging_db(db_path: str) -> sqlite3.Connection:
       - ``audio(id TEXT PRIMARY KEY)``               replaces the ~100 MB in-RAM set
 
     Both sentence tables use ``id TEXT PRIMARY KEY`` so an ``INSERT OR REPLACE``
-    import makes duplicate sentence ids resolve last-wins, matching today's
+    import makes duplicate sentence ids resolve last-wins, matching the former
     ``jpn_dict[parts[0]] = parts[2]``. A truncated ``.bz2`` surfaces here as an
     ``EOFError``/``OSError`` from :func:`_import_sentences` (decision D2) — no
     decompressed temp file is ever written.
@@ -433,16 +478,16 @@ def _import_sentences(compressed_path: str, conn: sqlite3.Connection, table: str
     ~1.5 GB decompressed corpus is never materialized as a file or string —
     peak memory is bounded by ``STAGING_CHUNK_SIZE`` rows (decision D2).
 
-    Parity with today's ``build_pairs_tsv``:
+    Parity with the former dict-join pipeline:
       - a line with fewer than 3 tab columns is skipped (``len(parts) < 3``);
       - empty lines are skipped;
       - ``id = parts[0]`` and ``text = parts[2]``;
       - duplicate sentence ids resolve last-wins via ``INSERT OR REPLACE``
         (matching ``jpn_dict[parts[0]] = parts[2]``).
 
-    Only the trailing ``\n`` is stripped (``rstrip("\n")``) so any carriage
-    return from a ``\r\n`` file is preserved in ``text`` exactly as today,
-    which relies on a whole-content ``strip()`` + ``split("\n")``.
+    Only the trailing ``\\n`` is stripped (``rstrip("\\n")``) so any carriage
+    return from a ``\\r\\n`` file is preserved in ``text`` exactly as the previous
+    whole-content ``strip()`` + ``split("\\n")`` code did.
 
     Args:
         compressed_path: Path to a ``.tsv.bz2`` sentence file.
@@ -480,10 +525,10 @@ def _import_links(compressed_path: str, conn: sqlite3.Connection) -> None:
     """Import a Tatoeba ``jpn-<lang>_links.tsv.bz2`` file into the ``links`` table.
 
     The ``links`` table has **no primary key and no deduplication** (decision
-    D4): a duplicate link row today produces a duplicate output row, and the
-    join in :func:`download_tatoeba_data` must preserve that exactly.
+    D4): a duplicate link row previously produced a duplicate output row, and
+    the join in :func:`download_tatoeba_data` must preserve that exactly.
 
-    Parity with today's ``build_pairs_tsv``:
+    Parity with the former dict-join pipeline:
       - empty lines are skipped;
       - a line with fewer than 2 tab columns is skipped (``len(parts) < 2``);
       - ``jpn_id = parts[0]`` and ``target_id = parts[1]``.
@@ -515,14 +560,14 @@ def _import_links(compressed_path: str, conn: sqlite3.Connection) -> None:
 def _import_audio(tar_compressed_path: str, conn: sqlite3.Connection) -> None:
     """Import ``sentences_with_audio.tar.bz2`` into the ``audio`` staging table.
 
-    Streams each tar member line-by-line so the audio index (≈1.5 M ids) is
+    Streams each tar member line-by-line so the audio index (~1.5 M ids) is
     never held in RAM as a Python set (decision D3). The parse rule is
-    byte-identical to today's :func:`download_audio_ids`: every member is read,
-    each line is fully stripped, and the first tab-separated column is kept as
-    an audio id only when it is all digits (``parts[0].isdigit()``).
+    byte-identical to the former audio-id parser: every member is read, each
+    line is fully stripped, and the first tab-separated column is kept as an
+    audio id only when it is all digits (``parts[0].isdigit()``).
 
     ``INSERT OR REPLACE`` into ``audio(id PRIMARY KEY)`` dedups ids exactly as
-    today's ``set.add`` did.
+    the previous ``set.add`` did.
 
     Args:
         tar_compressed_path: Path to a downloaded ``sentences_with_audio.tar.bz2``.
@@ -551,179 +596,229 @@ def _import_audio(tar_compressed_path: str, conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def download_and_extract_bz2(url: str) -> str:
+def _read_metadata() -> dict:
+    """Read metadata.json as a dict, tolerating a missing or corrupt file.
+
+    Used by :func:`download_tatoeba_data` for the read-modify-write of the
+    per-language download record. A missing file or invalid JSON yields ``{}``
+    so a fresh download always starts from an empty record rather than crashing
+    (matching the previous inline ``try/except json.JSONDecodeError`` behavior).
     """
-    Downloads a bz2 file and returns the decompressed content as a string.
+    if not os.path.exists(METADATA_FILE):
+        return {}
+    try:
+        with open(METADATA_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _write_metadata_atomic(metadata: dict) -> None:
+    """Write ``metadata`` to :data:`METADATA_FILE` atomically (streaming plan §5).
+
+    Writes to ``METADATA_FILE + ".tmp"`` and :func:`os.replace`-s it into place,
+    so a crash mid-write never leaves a truncated/corrupt ``metadata.json`` —
+    readers always see either the previous complete file or the new one. The
+    ``.tmp`` is removed if the write or replace fails.
+    """
+    tmp_path = METADATA_FILE + ".tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+        os.replace(tmp_path, METADATA_FILE)
+    except Exception:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        raise
+
+
+def _atomic_replace_db(src: str, dst: str) -> None:
+    """Atomically move the freshly built index ``src`` onto the final ``dst``.
+
+    Wraps :func:`os.replace` in a short retry loop (streaming plan §5 C2): on
+    Windows the replace fails with :class:`PermissionError` if ``dst`` is open
+    in another process; ``search_word`` connections are short-lived and the
+    batch dialog is modal, so a brief wait usually lets the handle close.
+    """
+    last_exc: Optional[Exception] = None
+    for attempt in range(3):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError as exc:
+            last_exc = exc
+            if attempt < 2:
+                time.sleep(0.5)
+    assert last_exc is not None
+    raise last_exc
+
+
+def _sweep_stale_workdirs(
+    base_dir: str = USER_FILES_DIR,
+    prefix: str = WORKDIR_PREFIX,
+    max_age_seconds: int = WORKDIR_MAX_AGE_SECONDS,
+    now: Optional[float] = None,
+) -> int:
+    """Remove left-behind ``<prefix>*`` workdirs older than ``max_age_seconds``.
+
+    Crash recovery for :func:`download_tatoeba_data` (streaming plan §5 C4): a
+    hard kill mid-run leaves a ``download_*`` directory; the next download
+    sweeps any such dir whose mtime is older than the threshold. The threshold
+    is generous (1 h) so a legitimately long-running download is never swept
+    out from under itself — newborn workdirs always survive.
 
     Args:
-    - url (str): The URL of the bz2 file to download.
+        base_dir: Directory holding the workdirs (defaults to :data:`USER_FILES_DIR`).
+        prefix: Workdir name prefix (defaults to :data:`WORKDIR_PREFIX`).
+        max_age_seconds: Remove dirs whose mtime is older than ``now - this``.
+        now: Override for the current time (mainly for tests).
 
     Returns:
-    - A string containing the decompressed contents of the file.
+        The number of directories removed.
     """
-    response = requests.get(url, stream=True, timeout=60)
-    response.raise_for_status()
-    return bz2.decompress(response.content).decode("utf-8")
+    if not os.path.isdir(base_dir):
+        return 0
+    current = time.time() if now is None else now
+    cutoff = current - max_age_seconds
+    removed = 0
+    for name in os.listdir(base_dir):
+        if not name.startswith(prefix):
+            continue
+        path = os.path.join(base_dir, name)
+        if not os.path.isdir(path):
+            continue
+        try:
+            mtime = os.stat(path).st_mtime
+        except OSError:
+            continue
+        if mtime < cutoff:
+            shutil.rmtree(path, ignore_errors=True)
+            removed += 1
+    return removed
 
-def download_audio_ids(url: str) -> set[str]:
-    """
-    Downloads sentences_with_audio.tar.bz2 and returns the set of sentence IDs
-    that have audio recordings.
-
-    The archive contains a single CSV file where the first tab-separated column
-    is the numeric Tatoeba sentence ID.
-
-    Args:
-    - url (str): The URL of the tar.bz2 audio index archive.
-
-    Returns:
-    - A set of sentence ID strings (e.g. {"42", "1337", ...}).
-    """
-    response = requests.get(url, stream=True, timeout=120)
-    response.raise_for_status()
-    audio_ids: set[str] = set()
-    with tarfile.open(fileobj=io.BytesIO(response.content), mode="r:bz2") as tar:
-        for member in tar.getmembers():
-            f = tar.extractfile(member)
-            if f is None:
-                continue
-            for raw_line in f:
-                line = raw_line.decode("utf-8").strip()
-                if not line:
-                    continue
-                parts = line.split("\t")
-                if parts and parts[0].isdigit():
-                    audio_ids.add(parts[0])
-    return audio_ids
-
-def build_pairs_tsv(jpn_sentences_tsv: str, target_sentences_tsv: str, links_tsv: str) -> str:
-    """
-    Joins the datasets and returns a single TSV string.
-
-    Args:
-    - jpn_sentences_tsv (str): The TSV string of Japanese sentences.
-    - target_sentences_tsv (str): The TSV string of target language sentences.
-    - links_tsv (str): The TSV string mapping Japanese sentence IDs to target sentence IDs.
-
-    Returns:
-    - A single TSV string containing the joined sentence pairs.
-    """
-    jpn_dict = {}
-    if jpn_sentences_tsv:
-        for line in jpn_sentences_tsv.strip().split("\n"):
-            if not line: continue
-            parts = line.split("\t")
-            if len(parts) >= 3:
-                jpn_dict[parts[0]] = parts[2]
-
-    target_dict = {}
-    if target_sentences_tsv:
-        for line in target_sentences_tsv.strip().split("\n"):
-            if not line: continue
-            parts = line.split("\t")
-            if len(parts) >= 3:
-                target_dict[parts[0]] = parts[2]
-
-    output_lines = []
-    if links_tsv:
-        for line in links_tsv.strip().split("\n"):
-            if not line: continue
-            parts = line.split("\t")
-            if len(parts) >= 2:
-                jpn_id, target_id = parts[0], parts[1]
-                if jpn_id in jpn_dict and target_id in target_dict:
-                    output_lines.append(f"{jpn_id}\t{jpn_dict[jpn_id]}\t{target_id}\t{target_dict[target_id]}")
-
-    if not output_lines:
-        return ""
-    return "\n".join(output_lines) + "\n"
 
 def download_tatoeba_data(lang_code: str, progress_callback=None) -> tuple[bool, str]:
     """
-    Main entry point to download data for a given language.
+    Download and build the search index for a language, with near-constant memory.
+
+    Streams each compressed Tatoeba file straight to a per-run workdir, imports
+    it line-by-line into a throwaway SQLite *staging* DB (never materializing a
+    decompressed corpus), then joins sentences + links + audio in SQL and feeds
+    the cursor straight into :func:`build_sqlite_index`. The completed index is
+    atomically renamed onto the final ``jpn_<lang>_index.db``; on any failure
+    the workdir is removed and the previous index is left untouched.
+
+    Progress callbacks are emitted in the same order and with the same strings
+    as before (UI log lines unchanged): fetch jpn -> fetch target -> fetch links
+    -> fetch audio index -> build pairs -> build search index. Each "fetch" now
+    also performs the staging import for that file; "build pairs" prepares the
+    SQL join cursor and "build search index" runs the index build.
 
     Args:
-    - lang_code (str): The ISO 639-3 language code (e.g. 'eng', 'spa') to download data for.
-    - progress_callback (callable, optional): A callback function to receive progress updates.
+        lang_code: The ISO 639-3 language code (e.g. 'eng', 'spa').
+        progress_callback: Optional callable receiving a localized status string.
 
     Returns:
-    - A tuple containing a boolean success flag and a status message string.
+        ``(success, message)``. On failure the previous index and metadata are
+        left intact and any partial workdir is cleaned up.
     """
     if not is_supported(lang_code):
         return False, f"Unknown language: {lang_code}"
 
     lang_label = get_localized_name(lang_code)
-    
+
     try:
         os.makedirs(USER_FILES_DIR, exist_ok=True)
-        
-        urls = get_download_urls(lang_code)
-        
-        if progress_callback:
-            progress_callback(_("batch_step_fetch_jpn"))
-        jpn_content = download_and_extract_bz2(urls["jpn_sentences"])
+        _sweep_stale_workdirs()
 
-        if progress_callback:
-            progress_callback(_("batch_step_fetch_target").format(lang=lang_label))
-        target_content = download_and_extract_bz2(urls["target_sentences"])
+        workdir = tempfile.mkdtemp(prefix=WORKDIR_PREFIX, dir=USER_FILES_DIR)
+        staging_path = os.path.join(workdir, "staging.db")
+        final_db_path = get_db_path(lang_code)
+        conn = None
+        try:
+            urls = get_download_urls(lang_code)
 
-        if progress_callback:
-            progress_callback(_("batch_step_fetch_links"))
-        links_content = download_and_extract_bz2(urls["links"])
+            if progress_callback:
+                progress_callback(_("batch_step_fetch_jpn"))
+            jpn_path = os.path.join(workdir, "jpn_sentences.tsv.bz2")
+            download_to_file(urls["jpn_sentences"], jpn_path)
+            conn = _create_staging_db(staging_path)
+            _import_sentences(jpn_path, conn, "jpn")
+            os.remove(jpn_path)
 
-        if progress_callback:
-            progress_callback(_("batch_step_fetch_audio_index"))
-        audio_ids: set[str] = download_audio_ids(AUDIO_INDEX_URL)
+            if progress_callback:
+                progress_callback(_("batch_step_fetch_target").format(lang=lang_label))
+            target_path = os.path.join(workdir, "target_sentences.tsv.bz2")
+            download_to_file(urls["target_sentences"], target_path)
+            _import_sentences(target_path, conn, "target")
+            os.remove(target_path)
 
-        if progress_callback:
-            progress_callback(_("batch_step_build_tsv"))
-        pairs_tsv = build_pairs_tsv(jpn_content, target_content, links_content)
-        
-        output_file = get_data_file_path(lang_code)
-        with open(output_file, "w", encoding="utf-8") as f:
-            f.write(pairs_tsv)
+            if progress_callback:
+                progress_callback(_("batch_step_fetch_links"))
+            links_path = os.path.join(workdir, "links.tsv.bz2")
+            download_to_file(urls["links"], links_path)
+            _import_links(links_path, conn)
+            os.remove(links_path)
 
-        if progress_callback:
-            progress_callback(_("batch_step_build_index"))
-        # Build SQLite index for strict word-boundary matching
-        db_path = get_db_path(lang_code)
-        build_sqlite_index(output_file, db_path, audio_ids=audio_ids)
-            
-        metadata = {}
-        if os.path.exists(METADATA_FILE):
-            with open(METADATA_FILE, "r", encoding="utf-8") as f:
+            if progress_callback:
+                progress_callback(_("batch_step_fetch_audio_index"))
+            audio_path = os.path.join(workdir, "sentences_with_audio.tar.bz2")
+            download_to_file(AUDIO_INDEX_URL, audio_path)
+            _import_audio(audio_path, conn)
+            os.remove(audio_path)
+
+            if progress_callback:
+                progress_callback(_("batch_step_build_tsv"))
+            join_cursor = conn.cursor()
+            join_cursor.execute("""
+                SELECT j.id, j.text, t.id, t.text,
+                       CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END AS has_audio
+                FROM links l
+                JOIN jpn    j ON j.id = l.jpn_id
+                JOIN target t ON t.id = l.target_id
+                LEFT JOIN audio a ON a.id = j.id
+                ORDER BY l.rowid
+            """)
+
+            if progress_callback:
+                progress_callback(_("batch_step_build_index"))
+            workdir_db = os.path.join(workdir, "index.db")
+            count = build_sqlite_index(join_cursor, workdir_db)
+
+            conn.close()
+            conn = None
+            _atomic_replace_db(workdir_db, final_db_path)
+
+            metadata = _read_metadata()
+            metadata[lang_code] = {
+                "downloaded_at": datetime.datetime.now().isoformat(),
+                "count": count,
+            }
+            _write_metadata_atomic(metadata)
+
+            translated = _("batch_download_success")
+            if translated != "batch_download_success":
+                success_msg = translated.format(count=count, lang=lang_label)
+            else:
+                success_msg = f"Download complete. {count} sentence pairs loaded for {lang_label}."
+            return True, success_msg
+        finally:
+            if conn is not None:
                 try:
-                    metadata = json.load(f)
-                except json.JSONDecodeError:
+                    conn.close()
+                except Exception:
                     pass
-                    
-        num_pairs = len(pairs_tsv.strip().split("\n")) if pairs_tsv.strip() else 0
-                    
-        metadata[lang_code] = {
-            "downloaded_at": datetime.datetime.now().isoformat(),
-            "count": num_pairs
-        }
-        
-        with open(METADATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2)
-            
-        # Get localized success message
-        # We need to fall back cleanly if translation is missing
-        translated = _("batch_download_success")
-        if translated != "batch_download_success":
-            success_msg = translated.format(count=num_pairs, lang=lang_label)
-        else:
-            success_msg = f"Download complete. {num_pairs} sentence pairs loaded for {lang_label}."
-            
-        return True, success_msg
-        
+            shutil.rmtree(workdir, ignore_errors=True)
     except Exception as e:
         translated = _("batch_download_error")
         if translated != "batch_download_error":
             error_msg = translated.format(error=str(e))
         else:
             error_msg = f"Download failed: {e}"
-            
         logging.error(f"Error downloading Tatoeba data: {e}", exc_info=True)
         return False, error_msg
 
@@ -739,7 +834,7 @@ def get_file_status(lang_code: str) -> Optional[str]:
     """
     if not is_supported(lang_code):
         return None
-        
+
     if os.path.exists(METADATA_FILE):
         try:
             with open(METADATA_FILE, "r", encoding="utf-8") as f:
@@ -752,16 +847,19 @@ def get_file_status(lang_code: str) -> Optional[str]:
 
 def is_data_available(lang_code: str) -> bool:
     """
-    Returns True if the data file exists.
+    Return True if a built search index exists for the language.
+
+    The SQLite index (``jpn_<lang>_index.db``) is now the sole data artifact —
+    the intermediate pairs TSV no longer exists (streaming plan §4). A present
+    metadata record is not enough on its own: the built index is the source of
+    truth, so this checks the DB file directly.
 
     Args:
     - lang_code (str): The ISO 639-3 language code to check for data availability.
 
     Returns:
-    - A boolean indicating whether the processed data file exists.
+    - True if the search index database exists.
     """
     if not is_supported(lang_code):
         return False
-        
-    file_path = get_data_file_path(lang_code)
-    return os.path.exists(file_path)
+    return os.path.exists(get_db_path(lang_code))

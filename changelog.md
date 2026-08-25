@@ -1,5 +1,11 @@
 # Japanese Examples - Changelog
 
+## v1.5.1 Update
+
+Memory optimization while downloading languages for batch processing.
+
+**Thank you for using the Japanese Examples add-on!**
+
 ## v1.5.0 Update
 Example sentences are no longer limited to English and French! The add-on now supports Spanish, Chinese (simplified), and Korean — in the manual picker and in batch mode — and the whole interface is translated into those three languages.
 
@@ -8,6 +14,8 @@ Example sentences are no longer limited to English and French! The add-on now su
 - **New Feature:** "Test Connection" button in the settings — verify that the Tatoeba API is reachable from your machine.
 - **Improvement:** Supported languages are now defined in a single registry, so adding more languages is much easier in the future.
 - **Housekeeping:** Removed the deprecated in-memory `load_index` code path (superseded by the SQLite index since v1.3.0).
+
+**Thank you for using the Japanese Examples add-on!**
 
 ## v1.4.0 Update
 Audio is here! Example sentences can now come with their native-speaker recordings from Tatoeba, in both manual and batch mode.

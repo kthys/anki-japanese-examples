@@ -10,8 +10,9 @@ no UI code edits.
 
 The registry is keyed by ISO 639-3 language code, the canonical identifier
 used by Tatoeba exports, the search API, per-deck preferences, and the local
-data files (``jpn_{code}_pairs.tsv``, ``jpn_{code}_index.db``,
-``metadata.json``).
+data files (``jpn_{code}_index.db`` and ``metadata.json``). Each language is
+now a single built index database; the intermediate ``.tsv`` artifact no
+longer exists.
 """
 
 try:
