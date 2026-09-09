@@ -5,31 +5,63 @@ on:
     tags:
       - 'v*'
 
-permissions:
-  contents: write
-  
+permissions: {}
+
 jobs:
-  build_and_release:
+  build:
     runs-on: ubuntu-latest
-    
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Get version from tag
         id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+        # The tag is validated against a strict format before use so it can
+        # never smuggle shell syntax into later steps.
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          if [[ ! "$VERSION" =~ ^v[0-9]+(\.[0-9]+)*$ ]]; then
+            echo "Unexpected tag format: $VERSION" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Build .ankiaddon file
         run: |
-          zip -r japanese-examples-${{ env.VERSION }}.ankiaddon * -x "*.git*" "*.github*" ".gitignore" "README.md" "screenshots/*" "*__pycache__*" "*.pyc" "*.DS_Store" "tests/*" "requirements-dev.txt"
+          zip -r "japanese-examples-${VERSION}.ankiaddon" * -x "*.git*" "*.github*" ".gitignore" "README.md" "screenshots/*" "*__pycache__*" "*.pyc" "*.DS_Store" "tests/*" "requirements-dev.txt"
+
+      - name: Upload addon artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: addon
+          path: japanese-examples-*.ankiaddon
+          if-no-files-found: error
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download addon artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: addon
 
       - name: Create Release
-        id: create_release
         uses: softprops/action-gh-release@v1
         with:
-          files: ./japanese-examples-${{ env.VERSION }}.ankiaddon
-          name: ${{ env.VERSION }}
+          files: ./japanese-examples-${{ needs.build.outputs.version }}.ankiaddon
+          name: ${{ needs.build.outputs.version }}
           draft: false
           prerelease: false
           generate_release_notes: true
