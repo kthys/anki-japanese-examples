@@ -4,6 +4,10 @@
 
 Memory optimization while downloading languages for batch processing.
 
+- **Improvement:** Downloads now stream straight to disk and build the index through a temporary database, so memory use stays roughly flat instead of scaling with the size of the language.
+- **Improvement:** Interrupted downloads are retried automatically, and a failed run now leaves your existing index untouched.
+- **Housekeeping:** The leftover `jpn_<lang>_pairs.tsv` files from v1.5.0 and earlier are deleted automatically, reclaiming a few hundred MB per language.
+
 **Thank you for using the Japanese Examples add-on!**
 
 ## v1.5.0 Update

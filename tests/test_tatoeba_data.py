@@ -109,6 +109,26 @@ def _patch_download(payloads_holder, fail_urls=()):
     return patch("src.core.tatoeba_data.download_to_file", side_effect=side_effect)
 
 
+def _rows_from_tsv(pairs_tsv_path, audio_ids=None):
+    r"""Yield build_sqlite_index 5-tuples by reading a legacy pairs TSV file.
+
+    Test-only bridge: the production pipeline feeds build_sqlite_index a staging
+    SQL-join cursor, but the boundary/inflection regression tests are much
+    easier to read against a small TSV fixture. Reproduces the parsing the old
+    build_sqlite_index did internally — whole-line strip() then split("\t"),
+    rows with fewer than 4 columns skipped, has_audio=1 iff audio_ids is truthy
+    and contains jpn_id.
+    """
+    with open(pairs_tsv_path, "r", encoding="utf-8") as f:
+        for line in f:
+            parts = line.strip().split("\t")
+            if len(parts) < 4:
+                continue
+            jpn_id, jpn_text, trans_id, trans_text = parts[0], parts[1], parts[2], parts[3]
+            has_audio = 1 if audio_ids and jpn_id in audio_ids else 0
+            yield (jpn_id, jpn_text, trans_id, trans_text, has_audio)
+
+
 def _dict_join_reference(jpn_text, target_text, links_text, audio_text):
     """Reference implementation of the old dict-join, for golden equivalence.
 
@@ -291,7 +311,7 @@ class TestTatoebaData(unittest.TestCase):
             f.write("3\t花火が綺麗だ。\t102\tThe fireworks are beautiful.\n")
 
         count = tatoeba_data.build_sqlite_index(
-            tatoeba_data._rows_from_tsv(tsv_path), db_path)
+            _rows_from_tsv(tsv_path), db_path)
         self.assertEqual(count, 3)
         self.assertTrue(os.path.exists(db_path))
 
@@ -319,12 +339,12 @@ class TestTatoebaData(unittest.TestCase):
         with open(tsv_path, "w", encoding="utf-8") as f:
             f.write("1\t猫が好きです。\t100\tI like cats.\n")
         tatoeba_data.build_sqlite_index(
-            tatoeba_data._rows_from_tsv(tsv_path), db_path)
+            _rows_from_tsv(tsv_path), db_path)
 
         # Rebuild from a missing TSV — must raise, old index must survive
         with self.assertRaises(Exception):
             tatoeba_data.build_sqlite_index(
-                tatoeba_data._rows_from_tsv(
+                _rows_from_tsv(
                     os.path.join(self.temp_dir, "does_not_exist.tsv")),
                 db_path)
 
@@ -343,12 +363,12 @@ class TestTatoebaData(unittest.TestCase):
         with open(tsv_path, "w", encoding="utf-8") as f:
             f.write("1\t猫が好きです。\t100\tI like cats.\n")
         tatoeba_data.build_sqlite_index(
-            tatoeba_data._rows_from_tsv(tsv_path), db_path)
+            _rows_from_tsv(tsv_path), db_path)
 
         with open(tsv_path, "w", encoding="utf-8") as f:
             f.write("2\t犬が好きです。\t101\tI like dogs.\n")
         count = tatoeba_data.build_sqlite_index(
-            tatoeba_data._rows_from_tsv(tsv_path), db_path)
+            _rows_from_tsv(tsv_path), db_path)
 
         self.assertEqual(count, 1)
         self.assertEqual(tatoeba_data.search_word(db_path, "猫"), [])
@@ -367,7 +387,7 @@ class TestTatoebaData(unittest.TestCase):
             f.write("2\t火が燃えている。\t101\tThe fire is burning.\n")
 
         tatoeba_data.build_sqlite_index(
-            tatoeba_data._rows_from_tsv(tsv_path), db_path)
+            _rows_from_tsv(tsv_path), db_path)
 
         # 火 should NOT match 花火 (花火 is a single kanji-run token)
         results = tatoeba_data.search_word(db_path, "火")
@@ -394,7 +414,7 @@ class TestTatoebaData(unittest.TestCase):
             f.write("4\tありがとうございます。\t103\tThank you.\n")
 
         tatoeba_data.build_sqlite_index(
-            tatoeba_data._rows_from_tsv(tsv_path), db_path)
+            _rows_from_tsv(tsv_path), db_path)
 
         # 負ける should match 負けるな but not 負けました
         results = tatoeba_data.search_word(db_path, "負ける")
@@ -423,7 +443,7 @@ class TestTatoebaData(unittest.TestCase):
             f.write("42\t猫が好きです。\t100\tI like cats.\n")
 
         tatoeba_data.build_sqlite_index(
-            tatoeba_data._rows_from_tsv(tsv_path), db_path)
+            _rows_from_tsv(tsv_path), db_path)
         results = tatoeba_data.search_word(db_path, "猫")
 
         self.assertEqual(len(results), 1)
@@ -450,7 +470,7 @@ class TestTatoebaData(unittest.TestCase):
             f.write("99\t犬が好きです。\t101\tI like dogs.\n")
 
         tatoeba_data.build_sqlite_index(
-            tatoeba_data._rows_from_tsv(tsv_path, audio_ids={"42"}), db_path)
+            _rows_from_tsv(tsv_path, audio_ids={"42"}), db_path)
 
         conn = _sqlite3.connect(db_path)
         rows = dict(conn.execute("SELECT jpn_id, has_audio FROM sentences").fetchall())
@@ -469,7 +489,7 @@ class TestTatoebaData(unittest.TestCase):
             f.write("10\t花が咲く。\t200\tThe flowers bloom.\n")
 
         tatoeba_data.build_sqlite_index(
-            tatoeba_data._rows_from_tsv(tsv_path), db_path)
+            _rows_from_tsv(tsv_path), db_path)
 
         conn = _sqlite3.connect(db_path)
         rows = conn.execute("SELECT has_audio FROM sentences").fetchall()
@@ -487,7 +507,7 @@ class TestTatoebaData(unittest.TestCase):
             f.write("42\t猫が好きです。\t100\tI like cats.\n")
 
         tatoeba_data.build_sqlite_index(
-            tatoeba_data._rows_from_tsv(tsv_path, audio_ids={"42"}), db_path)
+            _rows_from_tsv(tsv_path, audio_ids={"42"}), db_path)
         results = tatoeba_data.search_word(db_path, "猫")
         os.remove(db_path)
 
@@ -504,7 +524,7 @@ class TestTatoebaData(unittest.TestCase):
             f.write("99\t犬が好きです。\t101\tI like dogs.\n")
 
         tatoeba_data.build_sqlite_index(
-            tatoeba_data._rows_from_tsv(tsv_path, audio_ids=set()), db_path)
+            _rows_from_tsv(tsv_path, audio_ids=set()), db_path)
         results = tatoeba_data.search_word(db_path, "犬")
         os.remove(db_path)
 
@@ -541,7 +561,7 @@ class TestTatoebaData(unittest.TestCase):
         self.assertEqual(len(tatoeba_data.search_word(db_path, "犬")), 1)
         os.remove(db_path)
 
-    # ── download_to_file tests (streaming plan step 1) ─────────────
+    # ── download_to_file ───────────────────────────────────────────
 
     def test_download_to_file_writes_exact_bytes(self):
         """download_to_file streams multiple chunks and writes exact bytes to dest."""
@@ -643,7 +663,7 @@ class TestTatoebaData(unittest.TestCase):
         self.assertFalse(os.path.exists(dest))
         self.assertFalse(os.path.exists(dest + ".part"))
 
-    # ── staging import tests (streaming plan step 2) ───────────────
+    # ── staging imports ────────────────────────────────────────────
 
     def _new_staging_db(self):
         """Create a staging DB in the temp dir and return (conn, db_path)."""
@@ -826,7 +846,7 @@ class TestTatoebaData(unittest.TestCase):
         finally:
             conn.close()
 
-    # ── golden equivalence: dict-join vs SQL join (streaming plan §6.4) ──
+    # ── golden equivalence: dict-join vs SQL join ──
 
     def test_golden_equivalence_dict_join_vs_sql_join(self):
         """The staging SQL join produces the same multiset as the reference dict-join."""
@@ -866,7 +886,7 @@ class TestTatoebaData(unittest.TestCase):
             self.assertEqual(sorted(sql), sorted(ref),
                              f"golden mismatch [{c['name']}]: sql={sql} ref={ref}")
 
-    # ── download_tatoeba_data integration tests (streaming plan §6) ──
+    # ── download_tatoeba_data integration ──
 
     def test_download_tatoeba_data_success(self):
         """Full pipeline via a download_to_file mock: DB + searchable + metadata,
@@ -1006,7 +1026,7 @@ class TestTatoebaData(unittest.TestCase):
 
     def test_download_failure_preserves_old_db_and_metadata(self):
         """A failure mid-download leaves the previous DB searchable + metadata
-        untouched (the old TSV/DB inconsistency regression, plan §6.6)."""
+        untouched (the old TSV/DB inconsistency regression)."""
         # Pre-seed an existing index + metadata.
         old_db = tatoeba_data.get_db_path("eng")
         if os.path.exists(old_db):
@@ -1060,7 +1080,7 @@ class TestTatoebaData(unittest.TestCase):
         self.assertEqual(tatoeba_data.search_word(db, "猫"), [])
         self._no_leftover_workdirs()
 
-    # ── atomic metadata write (streaming plan §6.8) ──
+    # ── atomic metadata write ──
 
     def test_write_metadata_atomic_success(self):
         """_write_metadata_atomic writes valid JSON and leaves no .tmp behind."""
@@ -1105,7 +1125,7 @@ class TestTatoebaData(unittest.TestCase):
         self.assertEqual(tatoeba_data._read_metadata(),
                          {"eng": {"downloaded_at": "x", "count": 1}})
 
-    # ── stale-workdir sweep (streaming plan §5) ──
+    # ── stale-workdir sweep ──
 
     def test_sweep_stale_workdirs_removes_old_only(self):
         """A workdir older than the threshold is swept; a fresh one is left alone."""
@@ -1131,6 +1151,76 @@ class TestTatoebaData(unittest.TestCase):
             base_dir=self.temp_dir, now=_time.time())
         self.assertEqual(removed, 0)
         self.assertTrue(os.path.exists(other))
+
+    # ── legacy pairs-TSV cleanup (upgrade from <= 1.5.0) ──
+
+    def test_remove_legacy_pairs_files_removes_only_pairs_tsv(self):
+        """Every jpn_<lang>_pairs.tsv is removed; nothing else is touched."""
+        legacy = [self._pairs_tsv_path("eng"), self._pairs_tsv_path("fra")]
+        for p in legacy:
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("1\t猫\t10\tcat\n")
+        keep = [
+            tatoeba_data.get_db_path("eng"),
+            os.path.join(self.temp_dir, "metadata.json"),
+            os.path.join(self.temp_dir, "notes_pairs.txt"),
+            os.path.join(self.temp_dir, "jpn_eng_index.db.tmp"),
+        ]
+        for p in keep:
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("keep me")
+
+        removed = tatoeba_data.remove_legacy_pairs_files(base_dir=self.temp_dir)
+
+        self.assertEqual(removed, 2)
+        for p in legacy:
+            self.assertFalse(os.path.exists(p), f"should have been removed: {p}")
+        for p in keep:
+            self.assertTrue(os.path.exists(p), f"should have been kept: {p}")
+
+    def test_remove_legacy_pairs_files_is_idempotent_and_tolerates_missing_dir(self):
+        """A clean dir removes nothing; a missing dir returns 0 instead of raising."""
+        self.assertEqual(
+            tatoeba_data.remove_legacy_pairs_files(base_dir=self.temp_dir), 0)
+        self.assertEqual(
+            tatoeba_data.remove_legacy_pairs_files(
+                base_dir=os.path.join(self.temp_dir, "does_not_exist")), 0)
+
+    def test_download_removes_legacy_pairs_file(self):
+        """A download sweeps the legacy TSV left by an older version."""
+        stale = self._pairs_tsv_path("eng")
+        with open(stale, "w", encoding="utf-8") as f:
+            f.write("1\t猫\t10\tcat\n")
+
+        payloads = _payloads("eng",
+            jpn="1\tjpn\t猫が好き\n",
+            target="10\teng\tI like cats\n",
+            links="1\t10\n",
+            audio_member="")
+        with _patch_download([payloads]):
+            success, msg = tatoeba_data.download_tatoeba_data("eng")
+
+        self.assertTrue(success, msg)
+        self.assertFalse(os.path.exists(stale))
+        self.assertTrue(os.path.exists(tatoeba_data.get_db_path("eng")))
+
+    # ── Content-Encoding vs Content-Length ──
+
+    def test_download_to_file_skips_length_check_when_body_is_encoded(self):
+        """A decoded body shorter than Content-Length is not treated as truncated.
+
+        Content-Length counts *encoded* bytes; requests decodes transparently, so
+        comparing the two would fail a perfectly good download.
+        """
+        payload = b"decoded body, longer than the encoded length header"
+        resp = _streaming_response(
+            payload,
+            headers={"Content-Length": "10", "Content-Encoding": "gzip"})
+        dest = os.path.join(self.temp_dir, "encoded.bin")
+        with patch("requests.get", return_value=resp):
+            tatoeba_data.download_to_file("https://example.test/x.tsv.bz2", dest)
+        with open(dest, "rb") as f:
+            self.assertEqual(f.read(), payload)
 
 
 if __name__ == '__main__':

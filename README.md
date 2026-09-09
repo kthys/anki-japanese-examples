@@ -73,6 +73,8 @@ Batch mode downloads the per-language Tatoeba sentence exports and builds a loca
 
 During a download the importer also needs transient free space for the compressed exports and a throwaway build directory (peak usage can reach a few GB for the largest languages), but these are cleaned up automatically once the build finishes, leaving only the finished index behind.
 
+If you are upgrading from v1.5.0 or earlier, those versions also kept a `jpn_<lang>_pairs.tsv` next to each index. The add-on now deletes those automatically on startup, reclaiming a few hundred MB per language — you do not need to do anything.
+
 ### Why is audio missing for some sentences?
 
 Audio is best-effort: only a subset of Tatoeba sentences have native-speaker recordings. In both modes the plugin prefers sentences that have recordings, but if the chosen sentence has none (or Tatoeba returns "no recording"), the audio field is simply left empty. This is expected, not an error.
