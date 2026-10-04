@@ -7,5 +7,5 @@
 # See SECURITY-DEPENDENCIES.md for more information.
 
 responses>=0.25,<1
-requests
+requests>=2.34.2,<3
 PyQt6

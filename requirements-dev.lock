@@ -11,7 +11,7 @@
 # being automatically pulled during CI runs.
 
 # Direct dependencies
-requests==2.31.0
+requests==2.34.2
 PyQt6==6.6.1
 PyQt6-Qt6==6.6.1
 PyQt6-sip==13.6.0
@@ -20,6 +20,6 @@ responses==0.25.0
 # Transitive dependencies (explicitly pinned)
 certifi==2024.7.4
 charset-normalizer==3.3.2
-idna==3.6
+idna==3.20
 urllib3==2.8.0
 pyyaml==6.0.1
