@@ -6,6 +6,7 @@ Downloading a language for batch mode is now much lighter on your computer.
 
 - **Improvement:** Even the biggest languages download without slowing Anki down, so you can keep using it while you wait.
 - **Improvement:** If a download gets interrupted, the add-on tries again on its own. If it still can't finish, everything you already had stays safe and unchanged.
+- **Improvement:** When audio downloads fail during batch processing, the report now points you to a log file with the full details.
 - **Housekeeping:** Files left behind by older versions are now cleaned up automatically, freeing up space on your computer.
 
 **Thank you for using the Japanese Examples add-on!**
