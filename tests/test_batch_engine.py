@@ -359,6 +359,16 @@ class TestBatchResultAudioFields(unittest.TestCase):
         r1.pending_audio.append(("123", 1, "Audio"))
         self.assertEqual(len(r2.pending_audio), 0)
 
+    def test_audio_error_details_defaults_empty(self):
+        result = BatchResult()
+        self.assertEqual(result.audio_error_details, [])
+
+    def test_audio_error_details_not_shared(self):
+        r1 = BatchResult()
+        r2 = BatchResult()
+        r1.audio_error_details.append("boom")
+        self.assertEqual(len(r2.audio_error_details), 0)
+
     def test_total_processed_excludes_audio_counters(self):
         result = BatchResult(
             updated=2, skipped_existing=1, skipped_no_match=1,
@@ -486,6 +496,10 @@ class TestProcessPendingAudio(unittest.TestCase):
         self.assertEqual(note.fields[0], "")
         col.update_note.assert_not_called()
         self.assertEqual(result.pending_audio, [])
+        # Reason is captured for the persistent error log.
+        self.assertEqual(len(result.audio_error_details), 1)
+        self.assertIn("11111", result.audio_error_details[0])
+        self.assertIn("Connection refused", result.audio_error_details[0])
 
     @patch('src.core.batch_engine.audio_fetcher')
     def test_missing_audio_field_increments_audio_errors(self, mock_af):
@@ -504,6 +518,8 @@ class TestProcessPendingAudio(unittest.TestCase):
         self.assertEqual(result.audio_errors, 1)
         mock_af.fetch_audio_to_temp.assert_not_called()
         self.assertEqual(result.pending_audio, [])
+        self.assertEqual(len(result.audio_error_details), 1)
+        self.assertIn("NonexistentAudioField", result.audio_error_details[0])
 
     @patch('src.core.batch_engine.audio_fetcher')
     def test_unexpected_error_does_not_abort_remaining_items(self, mock_af):
@@ -533,6 +549,8 @@ class TestProcessPendingAudio(unittest.TestCase):
         self.assertEqual(result.audio_added, 1)
         self.assertEqual(good_note.fields[0], "[sound:22222.mp3]")
         self.assertEqual(result.pending_audio, [])
+        self.assertEqual(len(result.audio_error_details), 1)
+        self.assertIn("11111", result.audio_error_details[0])
 
     @patch('src.core.batch_engine.audio_fetcher')
     def test_download_phase_reports_progress(self, mock_af):
@@ -588,6 +606,96 @@ class TestProcessPendingAudio(unittest.TestCase):
         self.assertEqual(result.audio_errors, 1)
         self.assertEqual(result.audio_added, 1)
         self.assertEqual(good_note.fields[0], "[sound:22222.mp3]")
+        self.assertEqual(len(result.audio_error_details), 1)
+        self.assertIn("11111", result.audio_error_details[0])
+
+
+class TestWriteAudioErrorLog(unittest.TestCase):
+    """Tests for write_audio_error_log() — the persistent batch error log."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def test_no_details_returns_none_and_writes_nothing(self):
+        """A clean run must not create or touch the log file."""
+        from src.core.batch_engine import write_audio_error_log
+        result = BatchResult()
+        log_path = os.path.join(self.tmp_dir, "batch_errors.log")
+        self.assertIsNone(write_audio_error_log(result, log_path=log_path))
+        self.assertFalse(os.path.exists(log_path))
+
+    def test_writes_header_and_details(self):
+        """Details and a count header are written; the path is returned."""
+        from src.core.batch_engine import write_audio_error_log
+        result = BatchResult()
+        result.audio_error_details.append("note 1, sentence 11111: Connection refused")
+        log_path = os.path.join(self.tmp_dir, "batch_errors.log")
+
+        returned = write_audio_error_log(result, log_path=log_path)
+
+        self.assertEqual(returned, log_path)
+        with open(log_path, encoding="utf-8") as fh:
+            content = fh.read()
+        self.assertIn("1 audio error(s)", content)
+        self.assertIn("note 1, sentence 11111: Connection refused", content)
+
+    def test_appends_across_runs(self):
+        """A second run appends a new block instead of overwriting history."""
+        from src.core.batch_engine import write_audio_error_log
+        log_path = os.path.join(self.tmp_dir, "batch_errors.log")
+        r1 = BatchResult()
+        r1.audio_error_details.append("first failure")
+        r2 = BatchResult()
+        r2.audio_error_details.append("second failure")
+
+        write_audio_error_log(r1, log_path=log_path)
+        write_audio_error_log(r2, log_path=log_path)
+
+        with open(log_path, encoding="utf-8") as fh:
+            content = fh.read()
+        self.assertEqual(content.count("audio error(s) ==="), 2)
+        self.assertIn("first failure", content)
+        self.assertIn("second failure", content)
+
+    def test_creates_missing_directory(self):
+        """Nested destination directories are created on demand."""
+        from src.core.batch_engine import write_audio_error_log
+        result = BatchResult()
+        result.audio_error_details.append("x")
+        nested = os.path.join(self.tmp_dir, "sub", "dir", "batch_errors.log")
+
+        self.assertEqual(write_audio_error_log(result, log_path=nested), nested)
+        self.assertTrue(os.path.exists(nested))
+
+    def test_write_failure_returns_none(self):
+        """An I/O failure is contained and reported as None — never raised."""
+        from src.core.batch_engine import write_audio_error_log
+        blocker = os.path.join(self.tmp_dir, "blocker")
+        with open(blocker, "w") as fh:
+            fh.write("x")
+        result = BatchResult()
+        result.audio_error_details.append("x")
+        # Parent "directory" is actually a file, so makedirs/open must fail.
+        log_path = os.path.join(blocker, "batch_errors.log")
+
+        self.assertIsNone(write_audio_error_log(result, log_path=log_path))
+
+    def test_default_path_uses_user_files_dir(self):
+        """Without an explicit path, the log lands in user_files/batch_errors.log."""
+        from src.core.batch_engine import write_audio_error_log
+        import src.core.batch_engine as be
+        result = BatchResult()
+        result.audio_error_details.append("x")
+
+        with patch.object(be.tatoeba_data, "USER_FILES_DIR", self.tmp_dir):
+            returned = write_audio_error_log(result)
+
+        self.assertEqual(returned, os.path.join(self.tmp_dir, "batch_errors.log"))
+        self.assertTrue(os.path.exists(returned))
 
 
 class TestUndoBracketing(unittest.TestCase):

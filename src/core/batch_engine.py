@@ -4,6 +4,7 @@ import random
 import logging
 import sqlite3
 import os
+import time
 from dataclasses import dataclass, field
 
 try:
@@ -96,6 +97,10 @@ class BatchResult:
     - pending_audio (list[tuple[str, int, str]]): Staging list of (jpn_id, note_id, audio_field)
       triples accumulated by run_batch(), downloaded in a background op by
       download_pending_audio(), and drained on the main thread by register_pending_audio().
+    - audio_error_details (list[str]): One human-readable line per item counted in
+      audio_errors, recorded wherever the counter is incremented. The download phase
+      captures the reason on a background thread; write_audio_error_log() later
+      appends these lines to a file so failures survive after the report dialog closes.
     - changes: The OpChanges returned by the final merge_undo_entries() call when
       run_batch() was given an undo_name; None otherwise. A CollectionOp op must
       return this so Anki refreshes open windows and updates the Undo menu.
@@ -109,6 +114,7 @@ class BatchResult:
     audio_skipped: int = 0
     audio_errors: int = 0
     pending_audio: list = field(default_factory=list)
+    audio_error_details: list = field(default_factory=list)
     changes: object = None
 
     @property
@@ -169,6 +175,10 @@ def download_pending_audio(result: BatchResult, col, progress_cb=None) -> list:
                 field_names_cache[ntid] = [fld["name"] for fld in note.note_type()["flds"]]
             if audio_field not in field_names_cache[ntid]:
                 logger.warning("Audio field %r not found on note %d", audio_field, note_id)
+                result.audio_error_details.append(
+                    f"note {note_id}, sentence {jpn_id}: audio field "
+                    f"{audio_field!r} not found on the note type"
+                )
                 items.append((note_id, audio_field, jpn_id, AUDIO_FETCH_ERROR, None))
                 continue
 
@@ -184,11 +194,17 @@ def download_pending_audio(result: BatchResult, col, progress_cb=None) -> list:
                 items.append((note_id, audio_field, jpn_id, AUDIO_FETCHED, tmp_path))
         except AudioDownloadError as exc:
             logger.error("Audio download error for jpn_id %s: %s", jpn_id, exc)
+            result.audio_error_details.append(
+                f"note {note_id}, sentence {jpn_id}: {exc}"
+            )
             items.append((note_id, audio_field, jpn_id, AUDIO_FETCH_ERROR, None))
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "Unexpected error downloading audio for note %d (jpn_id %s)",
                 note_id, jpn_id,
+            )
+            result.audio_error_details.append(
+                f"note {note_id}, sentence {jpn_id}: unexpected error: {exc}"
             )
             items.append((note_id, audio_field, jpn_id, AUDIO_FETCH_ERROR, None))
     return items
@@ -228,8 +244,12 @@ def register_audio_media(items: list, result: BatchResult, col) -> list:
             else:  # AUDIO_FETCHED
                 fname = audio_fetcher.register_audio_file(payload, col)
                 registered.append((note_id, audio_field, jpn_id, fname))
-        except Exception:
+        except Exception as exc:
             result.audio_errors += 1
+            result.audio_error_details.append(
+                f"note {note_id}, sentence {jpn_id}: failed to register audio "
+                f"file {payload!r}: {exc}"
+            )
             logger.exception(
                 "Failed to register audio media for note %d (jpn_id %s)",
                 note_id, jpn_id,
@@ -276,6 +296,10 @@ def apply_audio_fields(registered: list, result: BatchResult, col,
             field_names = field_names_cache[ntid]
             if audio_field not in field_names:
                 result.audio_errors += 1
+                result.audio_error_details.append(
+                    f"note {note_id}, sentence {jpn_id}: audio field "
+                    f"{audio_field!r} not found on the note type"
+                )
                 logger.warning("Audio field %r not found on note %d", audio_field, note_id)
                 continue
 
@@ -287,8 +311,12 @@ def apply_audio_fields(registered: list, result: BatchResult, col,
             # Same periodic merge as run_batch — see comment there.
             if undo_pos is not None and applied % 30 == 0:
                 col.merge_undo_entries(undo_pos)
-        except Exception:
+        except Exception as exc:
             result.audio_errors += 1
+            result.audio_error_details.append(
+                f"note {note_id}, sentence {jpn_id}: unexpected error applying "
+                f"audio field: {exc}"
+            )
             logger.exception(
                 "Unexpected error applying audio field for note %d (jpn_id %s)",
                 note_id, jpn_id,
@@ -336,6 +364,56 @@ def process_pending_audio(result: BatchResult, col) -> None:
         return
     items = download_pending_audio(result, col)
     register_pending_audio(items, result, col)
+
+
+def write_audio_error_log(result: BatchResult, log_path: "str | None" = None) -> "str | None":
+    """Append this run's audio error details to a log file.
+
+    Called on the main thread after a batch run (e.g. from the report dialog),
+    so the per-item reasons captured in result.audio_error_details survive after
+    the transient report dialog closes. Each call appends a timestamped block,
+    keeping a history across runs; only errors are written, so the file grows
+    negligibly.
+
+    Never raises: a logging failure must not break the calling UI flow. Failures
+    are logged via logger.exception and reported as a None return.
+
+    Args:
+    - result: The BatchResult whose audio_error_details are written.
+    - log_path (str | None): Destination file. When None (default), the path is
+      user_files/batch_errors.log (resolved from tatoeba_data.USER_FILES_DIR at
+      call time, so tests can redirect it).
+
+    Returns:
+    - The log file path on success, or None when there are no errors to write or
+      the write failed.
+    """
+    if not result.audio_error_details:
+        return None
+
+    if log_path is None:
+        try:
+            user_files_dir = tatoeba_data.USER_FILES_DIR
+        except Exception:
+            logger.exception("Could not resolve user_files directory for audio error log")
+            return None
+        log_path = os.path.join(user_files_dir, "batch_errors.log")
+
+    try:
+        parent = os.path.dirname(log_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        count = len(result.audio_error_details)
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write(f"=== {timestamp} — {count} audio error(s) ===\n")
+            for detail in result.audio_error_details:
+                fh.write(f"{detail}\n")
+            fh.write("\n")
+        return log_path
+    except Exception:
+        logger.exception("Could not write audio error log to %s", log_path)
+        return None
 
 
 def run_batch(

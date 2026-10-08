@@ -42,6 +42,7 @@
     "batch_trans_field_label": "Campo de ejemplo traducido:",
     "batch_report_title": "Informe del procesamiento por lotes",
     "batch_report_body": "Procesamiento por lotes completado.\n\nActualizados: {updated}\nOmitidos (ya tienen ejemplos): {skipped_existing}\nOmitidos (sin coincidencias): {skipped_no_match}\nOmitidos (campos no encontrados): {skipped_missing}\nErrores: {errors}\nAudio añadido: {audio_added}\nAudio omitido (sin grabación): {audio_skipped}\nErrores de audio: {audio_errors}",
+    "batch_report_error_log": "Detalles de los errores de audio guardados en:\n{path}",
     "batch_no_data": "No hay datos de Tatoeba disponibles. Descarga los datos primero.",
     "batch_no_fields": "No hay campos disponibles. Selecciona un mazo que tenga notas.",
     "batch_progress_title": "Descargando datos",
