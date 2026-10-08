@@ -30,11 +30,12 @@ REQUEST_TIMEOUT = 10  # seconds
 
 
 class AudioDownloadError(Exception):
-    """Raised when a Tatoeba audio download fails for a non-404 reason.
+    """Raised when a Tatoeba audio download fails for a non-404/403 reason.
 
     Callers (e.g. batch engine) should catch this exception,
     increment an audio_errors counter, and surface a retry prompt to the user.
-    HTTP 404 (no recording exists) does NOT raise this — it returns None instead.
+    HTTP 404 (no recording exists) and HTTP 403 (the author does not allow
+    reuse outside of Tatoeba) do NOT raise this — they return None instead.
     """
 
 
@@ -69,11 +70,13 @@ def fetch_audio_to_temp(jpn_id: str) -> "str | None":
         because col.media.add_file() uses the basename as the destination name).
         The caller owns the file: pass it to register_audio_file() or clean it
         up with cleanup_temp_audio().
-        None if Tatoeba returns HTTP 404 (sentence has no recording — not an error).
+        None if Tatoeba returns HTTP 404 (sentence has no recording), or HTTP 403
+        (the audio author does not allow reuse outside of Tatoeba — a permanent
+        restriction, not an error). Neither counts as a failure.
 
     Raises:
         AudioDownloadError: For all other network failures (timeout, connection
-            refused, DNS failure, non-200/non-404 HTTP status codes).
+            refused, DNS failure, non-200/non-404/non-403 HTTP status codes).
     """
     url = AUDIO_URL_TEMPLATE.format(jpn_id=jpn_id)
 
@@ -89,6 +92,19 @@ def fetch_audio_to_temp(jpn_id: str) -> "str | None":
     # 404 means Tatoeba has no recording for this sentence — this is normal
     # (many sentences have no audio). Return None so callers can handle gracefully.
     if response.status_code == 404:
+        return None
+
+    # 403 means the audio author does not allow reuse outside of Tatoeba (the
+    # server's response body states this explicitly). This is a permanent
+    # licensing restriction, not a failure — treat it like a missing recording
+    # so batch runs skip it instead of reporting an error that can never
+    # succeed. Deliberately not fetched through any alternative endpoint: the
+    # author's restriction is respected.
+    if response.status_code == 403:
+        logger.info(
+            "Recording for sentence %s is restricted to Tatoeba-only reuse — skipping",
+            jpn_id,
+        )
         return None
 
     # All other non-2xx responses are unexpected failures.

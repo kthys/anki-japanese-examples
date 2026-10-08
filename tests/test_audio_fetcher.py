@@ -65,6 +65,22 @@ class TestDownloadAudio(unittest.TestCase):
         self.assertIsNone(result)
 
     @responses_lib.activate
+    def test_403_restricted_recording_returns_none(self):
+        """403 (author disallows reuse outside Tatoeba) is skipped, not an error.
+
+        The restriction is permanent, so no alternative endpoint is tried.
+        """
+        responses_lib.get(
+            "https://audio.tatoeba.org/sentences/jpn/10933373.mp3",
+            status=403,
+        )
+        col = FakeCol()
+        result = audio_fetcher.download_audio("10933373", col)
+        self.assertIsNone(result)
+        # Only the CDN request was made — nothing else was attempted.
+        self.assertEqual(len(responses_lib.calls), 1)
+
+    @responses_lib.activate
     def test_network_error_raises_audio_download_error(self):
         """non-404 failures raise AudioDownloadError."""
         responses_lib.get(
