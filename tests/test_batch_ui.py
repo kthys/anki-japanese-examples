@@ -767,6 +767,7 @@ class TestBatchReport(unittest.TestCase):
                 audio_added=result.audio_added,
                 audio_skipped=result.audio_skipped,
                 audio_errors=result.audio_errors,
+                audio_reselected=result.audio_reselected,
             )
         else:
             # Fallback — code under test must include audio lines here too
@@ -779,7 +780,8 @@ class TestBatchReport(unittest.TestCase):
                 f"Errors: {result.errors}\n"
                 f"Audio added: {result.audio_added}\n"
                 f"Audio skipped (no recording): {result.audio_skipped}\n"
-                f"Audio errors: {result.audio_errors}"
+                f"Audio errors: {result.audio_errors}\n"
+                f"Audio re-selected: {result.audio_reselected}"
             )
 
         self.assertIn("5", report)   # audio_added value

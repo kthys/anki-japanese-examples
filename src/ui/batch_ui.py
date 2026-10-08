@@ -732,6 +732,7 @@ class BatchDialog(QDialog):
                         audio_added=result.audio_added,
                         audio_skipped=result.audio_skipped,
                         audio_errors=result.audio_errors,
+                        audio_reselected=result.audio_reselected,
                     )
                 else:
                     report = (
@@ -743,7 +744,8 @@ class BatchDialog(QDialog):
                         f"Errors: {result.errors}\n"
                         f"Audio added: {result.audio_added}\n"
                         f"Audio skipped (no recording): {result.audio_skipped}\n"
-                        f"Audio errors: {result.audio_errors}"
+                        f"Audio errors: {result.audio_errors}\n"
+                        f"Audio re-selected: {result.audio_reselected}"
                     )
 
                 # Persist the per-item audio error reasons so they survive after

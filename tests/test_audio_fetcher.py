@@ -118,5 +118,51 @@ class TestDownloadAudio(unittest.TestCase):
         self.assertEqual(sound_tag, "[sound:12345.mp3]")
 
 
+class TestFetchAudioToTempEx(unittest.TestCase):
+    """Status-returning variant used by batch 403 re-selection."""
+
+    @responses_lib.activate
+    def test_ok_returns_path(self):
+        responses_lib.get(
+            "https://audio.tatoeba.org/sentences/jpn/12345.mp3",
+            body=b"\xff\xfb",
+            status=200,
+        )
+        status, path = audio_fetcher.fetch_audio_to_temp_ex("12345")
+        self.assertEqual(status, audio_fetcher.FETCH_OK)
+        self.assertIsNotNone(path)
+        self.assertTrue(os.path.exists(path))
+        audio_fetcher.cleanup_temp_audio(path)
+
+    @responses_lib.activate
+    def test_404_reports_no_recording(self):
+        responses_lib.get(
+            "https://audio.tatoeba.org/sentences/jpn/99999.mp3",
+            status=404,
+        )
+        status, path = audio_fetcher.fetch_audio_to_temp_ex("99999")
+        self.assertEqual(status, audio_fetcher.FETCH_NO_RECORDING)
+        self.assertIsNone(path)
+
+    @responses_lib.activate
+    def test_403_reports_restricted(self):
+        responses_lib.get(
+            "https://audio.tatoeba.org/sentences/jpn/10933373.mp3",
+            status=403,
+        )
+        status, path = audio_fetcher.fetch_audio_to_temp_ex("10933373")
+        self.assertEqual(status, audio_fetcher.FETCH_RESTRICTED)
+        self.assertIsNone(path)
+
+    @responses_lib.activate
+    def test_network_error_still_raises(self):
+        responses_lib.get(
+            "https://audio.tatoeba.org/sentences/jpn/11111.mp3",
+            body=RequestsConnectionError("simulated timeout"),
+        )
+        with self.assertRaises(AudioDownloadError):
+            audio_fetcher.fetch_audio_to_temp_ex("11111")
+
+
 if __name__ == "__main__":
     unittest.main()

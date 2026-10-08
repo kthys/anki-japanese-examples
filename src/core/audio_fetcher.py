@@ -28,6 +28,13 @@ logger = logging.getLogger(__name__)
 AUDIO_URL_TEMPLATE = "https://audio.tatoeba.org/sentences/jpn/{jpn_id}.mp3"
 REQUEST_TIMEOUT = 10  # seconds
 
+# Status values returned by fetch_audio_to_temp_ex(). They let callers tell a
+# permanent 403 (author restricts reuse — re-select another sentence) apart from
+# a 404 (no recording exists — nothing to re-select for).
+FETCH_OK = "ok"                    # payload: temp file path
+FETCH_NO_RECORDING = "no_recording"  # HTTP 404 — sentence has no recording
+FETCH_RESTRICTED = "restricted"    # HTTP 403 — author disallows reuse
+
 
 class AudioDownloadError(Exception):
     """Raised when a Tatoeba audio download fails for a non-404/403 reason.
@@ -55,24 +62,33 @@ def cleanup_temp_audio(tmp_path: str) -> None:
         logger.warning("Could not delete temp dir %s", tmp_dir)
 
 
-def fetch_audio_to_temp(jpn_id: str) -> "str | None":
-    """Download the Tatoeba audio for jpn_id into a temporary file.
+def fetch_audio_to_temp_ex(jpn_id: str) -> "tuple[str, str | None]":
+    """Download the Tatoeba audio for jpn_id, reporting *why* it did not arrive.
 
     BACKGROUND-SAFE: pure network + local file I/O, no collection access.
     This is the slow phase — run it off the main thread whenever possible.
+
+    This is the status-returning counterpart of fetch_audio_to_temp() and exists
+    so batch mode can distinguish a permanent 403 (author restricts reuse outside
+    Tatoeba) from a 404 (the sentence simply has no recording): only the former
+    justifies re-selecting a different sentence for the same word.
 
     Args:
         jpn_id: The Tatoeba sentence ID (e.g. "12345"). Used to construct the
                 audio URL and the temp filename "{jpn_id}.mp3".
 
     Returns:
-        The path to a temp file named "{jpn_id}.mp3" (in its own temp directory,
-        because col.media.add_file() uses the basename as the destination name).
-        The caller owns the file: pass it to register_audio_file() or clean it
-        up with cleanup_temp_audio().
-        None if Tatoeba returns HTTP 404 (sentence has no recording), or HTTP 403
-        (the audio author does not allow reuse outside of Tatoeba — a permanent
-        restriction, not an error). Neither counts as a failure.
+        A ``(status, tmp_path)`` tuple where:
+        - ``(FETCH_OK, path)``: the file was downloaded to ``path`` (a temp file
+          named "{jpn_id}.mp3" in its own temp directory, because
+          col.media.add_file() uses the basename as the destination name). The
+          caller owns the file: pass it to register_audio_file() or clean it up
+          with cleanup_temp_audio().
+        - ``(FETCH_NO_RECORDING, None)``: Tatoeba returned HTTP 404.
+        - ``(FETCH_RESTRICTED, None)``: Tatoeba returned HTTP 403 — the audio
+          author does not allow reuse outside of Tatoeba. A permanent licensing
+          restriction, deliberately not worked around through any alternative
+          endpoint.
 
     Raises:
         AudioDownloadError: For all other network failures (timeout, connection
@@ -90,22 +106,21 @@ def fetch_audio_to_temp(jpn_id: str) -> "str | None":
         ) from exc
 
     # 404 means Tatoeba has no recording for this sentence — this is normal
-    # (many sentences have no audio). Return None so callers can handle gracefully.
+    # (many sentences have no audio).
     if response.status_code == 404:
-        return None
+        return FETCH_NO_RECORDING, None
 
     # 403 means the audio author does not allow reuse outside of Tatoeba (the
     # server's response body states this explicitly). This is a permanent
-    # licensing restriction, not a failure — treat it like a missing recording
-    # so batch runs skip it instead of reporting an error that can never
-    # succeed. Deliberately not fetched through any alternative endpoint: the
-    # author's restriction is respected.
+    # licensing restriction, not a failure — callers skip it. Deliberately not
+    # fetched through any alternative endpoint: the author's restriction is
+    # respected.
     if response.status_code == 403:
         logger.info(
             "Recording for sentence %s is restricted to Tatoeba-only reuse — skipping",
             jpn_id,
         )
-        return None
+        return FETCH_RESTRICTED, None
 
     # All other non-2xx responses are unexpected failures.
     try:
@@ -123,7 +138,26 @@ def fetch_audio_to_temp(jpn_id: str) -> "str | None":
     except OSError:
         cleanup_temp_audio(tmp_path)
         raise
-    return tmp_path
+    return FETCH_OK, tmp_path
+
+
+def fetch_audio_to_temp(jpn_id: str) -> "str | None":
+    """Download the Tatoeba audio for jpn_id into a temporary file.
+
+    Thin wrapper over fetch_audio_to_temp_ex() that discards the reason: it
+    returns the temp path on success and None for both a 404 (no recording) and
+    a 403 (reuse restricted). Callers that need to tell the two apart (batch
+    re-selection) should use fetch_audio_to_temp_ex() directly.
+
+    BACKGROUND-SAFE: see fetch_audio_to_temp_ex().
+
+    Raises:
+        AudioDownloadError: For all other network failures.
+    """
+    status, tmp_path = fetch_audio_to_temp_ex(jpn_id)
+    if status == FETCH_OK:
+        return tmp_path
+    return None
 
 
 def register_audio_file(tmp_path: str, col) -> str:
