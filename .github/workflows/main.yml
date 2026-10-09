@@ -99,7 +99,7 @@ jobs:
       - name: Build .ankiaddon file
         run: |
           # Quoted variable, value already validated (vX.Y.Z[-prerelease])
-          zip -r "japanese-examples-${VERSION}.ankiaddon" * -x "*.git*" "*.github*" ".gitignore" "README.md" "screenshots/*" "*__pycache__*" "*.pyc" "*.DS_Store" "tests/*" "requirements-dev.txt" "requirements-dev.lock" "SECURITY-DEPENDENCIES.md"
+          zip -r "japanese-examples-${VERSION}.ankiaddon" * -x "*.git*" "*.github*" ".gitignore" "README.md" "screenshots/*" "*__pycache__*" "*.pyc" "*.DS_Store" "tests/*" "requirements-dev.txt" "requirements-dev.lock"
 
       - name: Upload addon artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
