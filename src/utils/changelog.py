@@ -1,5 +1,5 @@
-from aqt import mw, gui_hooks
-from aqt.qt import QDialog, QVBoxLayout, QTextBrowser, QPushButton, Qt
+from aqt import mw
+from aqt.qt import QDialog, QVBoxLayout, QTextBrowser, QPushButton
 import json
 import os
 

@@ -732,6 +732,7 @@ class BatchDialog(QDialog):
                         audio_added=result.audio_added,
                         audio_skipped=result.audio_skipped,
                         audio_errors=result.audio_errors,
+                        audio_reselected=result.audio_reselected,
                     )
                 else:
                     report = (
@@ -743,8 +744,18 @@ class BatchDialog(QDialog):
                         f"Errors: {result.errors}\n"
                         f"Audio added: {result.audio_added}\n"
                         f"Audio skipped (no recording): {result.audio_skipped}\n"
-                        f"Audio errors: {result.audio_errors}"
+                        f"Audio errors: {result.audio_errors}\n"
+                        f"Audio re-selected: {result.audio_reselected}"
                     )
+
+                # Persist the per-item audio error reasons so they survive after
+                # this dialog closes (the report only shows counts).
+                log_path = batch_engine.write_audio_error_log(result)
+                if log_path:
+                    log_msg = _("batch_report_error_log")
+                    if log_msg == "batch_report_error_log":
+                        log_msg = "Audio error details saved to:\n{path}"
+                    report += "\n\n" + log_msg.format(path=log_path)
 
                 showInfo(report)
                 self.run_button.setEnabled(True)
@@ -798,6 +809,10 @@ class BatchDialog(QDialog):
                     _active_ops.discard(apply_op)
                     logger.error("Applying audio fields failed: %s", exc)
                     result.audio_errors += len(registered)
+                    result.audio_error_details.append(
+                        f"Applying audio fields failed entirely "
+                        f"({len(registered)} note(s)): {exc}"
+                    )
                     result.pending_audio.clear()
                     safe_execute(show_report)
 
@@ -812,6 +827,10 @@ class BatchDialog(QDialog):
                 # fires on catastrophic failure — count the whole batch as
                 # errored and still show the report.
                 result.audio_errors += total_audio
+                result.audio_error_details.append(
+                    f"Audio download phase failed entirely "
+                    f"({total_audio} note(s)): {exc}"
+                )
                 result.pending_audio.clear()
                 safe_execute(show_report)
 

@@ -4,6 +4,7 @@ import random
 import logging
 import sqlite3
 import os
+import time
 from dataclasses import dataclass, field
 
 try:
@@ -90,12 +91,26 @@ class BatchResult:
     - audio_added (int): Populated by register_pending_audio(); sentences with audio
       successfully registered.
     - audio_skipped (int): Populated by register_pending_audio(); sentences where
-      Tatoeba returned 404 (no recording).
+      Tatoeba returned 404 (no recording) or whose 403 re-selection found no
+      usable alternative.
     - audio_errors (int): Populated by register_pending_audio(); sentences where the
       download or registration failed.
-    - pending_audio (list[tuple[str, int, str]]): Staging list of (jpn_id, note_id, audio_field)
-      triples accumulated by run_batch(), downloaded in a background op by
-      download_pending_audio(), and drained on the main thread by register_pending_audio().
+    - audio_reselected (int): Populated by apply_audio_fields(); pairs whose audio
+      came back 403 (author restricts reuse) and whose text + audio were swapped
+      to a different sentence that downloaded successfully. Informational only —
+      these pairs also count in audio_added.
+    - pending_audio (list[tuple]): Staging list of re-selection-ready 6-tuples
+      ``(jpn_id, note_id, jpn_field, trans_field, audio_field, alt_candidates)``
+      accumulated by run_batch(), downloaded in a background op by
+      download_pending_audio(), and drained on the main thread by
+      register_pending_audio(). ``alt_candidates`` is a list of
+      ``(jpn_id, jpn_text, trans_text)`` fallbacks (all with a recording in the
+      index, none already selected or present on the note) to try when the
+      primary sentence's audio is 403-restricted.
+    - audio_error_details (list[str]): One human-readable line per item counted in
+      audio_errors, recorded wherever the counter is incremented. The download phase
+      captures the reason on a background thread; write_audio_error_log() later
+      appends these lines to a file so failures survive after the report dialog closes.
     - changes: The OpChanges returned by the final merge_undo_entries() call when
       run_batch() was given an undo_name; None otherwise. A CollectionOp op must
       return this so Anki refreshes open windows and updates the Undo menu.
@@ -108,7 +123,9 @@ class BatchResult:
     audio_added: int = 0
     audio_skipped: int = 0
     audio_errors: int = 0
+    audio_reselected: int = 0
     pending_audio: list = field(default_factory=list)
+    audio_error_details: list = field(default_factory=list)
     changes: object = None
 
     @property
@@ -119,10 +136,13 @@ class BatchResult:
 
 
 # Per-item outcome statuses produced by download_pending_audio() and
-# consumed by register_pending_audio().
-AUDIO_FETCHED = "fetched"        # payload: temp file path
-AUDIO_EXISTS = "exists"          # payload: filename already in col.media
-AUDIO_NO_RECORDING = "no_audio"  # payload: None (Tatoeba 404)
+# consumed by register_audio_media().
+# AUDIO_RESOLVED: audio is available. payload is an audio_fetcher.ResolvedAudio
+#   carrying the chosen sentence + source; register_audio_media() registers a
+#   temp file or passes a media filename through, and apply_audio_fields() swaps
+#   the pair's text when the resolution came from a 403 re-selection.
+AUDIO_RESOLVED = "resolved"
+AUDIO_NO_RECORDING = "no_audio"  # payload: None (Tatoeba 404, or 403 with no usable alternative)
 AUDIO_FETCH_ERROR = "error"      # payload: None
 
 
@@ -133,12 +153,16 @@ def download_pending_audio(result: BatchResult, col, progress_cb=None) -> list:
     network + temp-file I/O. Designed to run inside a QueryOp op. All counter
     accounting happens later in register_pending_audio(), on the main thread.
 
-    For each (jpn_id, note_id, audio_field) triple in result.pending_audio,
-    produces one (note_id, audio_field, jpn_id, status, payload) tuple:
-    - AUDIO_EXISTS: file already registered in col.media; payload is the filename.
-    - AUDIO_FETCHED: downloaded; payload is the temp file path (owned by the
-      caller until register_pending_audio consumes or cleans it).
-    - AUDIO_NO_RECORDING: Tatoeba returned 404; payload is None.
+    For each 6-tuple
+    (jpn_id, note_id, jpn_field, trans_field, audio_field, alt_candidates) in
+    result.pending_audio, produces one
+    (note_id, jpn_field, trans_field, audio_field, jpn_id, status, payload) tuple:
+    - AUDIO_RESOLVED: audio is available (already in col.media, or downloaded).
+      payload is an audio_fetcher.ResolvedAudio naming the chosen sentence and
+      the source; a 403 on the primary is resolved by re-selecting from
+      alt_candidates, and the ResolvedAudio then carries the replacement text.
+    - AUDIO_NO_RECORDING: Tatoeba returned 404, or returned 403 and no alternative
+      candidate's audio could be obtained; payload is None.
     - AUDIO_FETCH_ERROR: download failed, audio field missing from the note
       type, or the note could not be loaded; payload is None. One bad item
       never aborts the remaining downloads.
@@ -158,10 +182,18 @@ def download_pending_audio(result: BatchResult, col, progress_cb=None) -> list:
         return items
 
     field_names_cache: dict[int, list[str]] = {}
+    # Per-note bookkeeping for 403 re-selection, shared across the pairs of one
+    # note so two restricted pairs never swap to the same sentence and no pair
+    # retries a recording already known to be restricted.
+    note_restricted_ids: dict[int, set] = {}
+    note_used_ids: dict[int, set] = {}
+
     total = len(result.pending_audio)
-    for i, (jpn_id, note_id, audio_field) in enumerate(result.pending_audio, start=1):
+    for i, entry in enumerate(result.pending_audio, start=1):
         if progress_cb:
             progress_cb(i, total)
+        (jpn_id, note_id, jpn_field, trans_field,
+         audio_field, alt_candidates) = entry
         try:
             note = col.get_note(note_id)
             ntid = note.mid
@@ -169,28 +201,42 @@ def download_pending_audio(result: BatchResult, col, progress_cb=None) -> list:
                 field_names_cache[ntid] = [fld["name"] for fld in note.note_type()["flds"]]
             if audio_field not in field_names_cache[ntid]:
                 logger.warning("Audio field %r not found on note %d", audio_field, note_id)
-                items.append((note_id, audio_field, jpn_id, AUDIO_FETCH_ERROR, None))
+                result.audio_error_details.append(
+                    f"note {note_id}, sentence {jpn_id}: audio field "
+                    f"{audio_field!r} not found on the note type"
+                )
+                items.append((note_id, jpn_field, trans_field, audio_field,
+                              jpn_id, AUDIO_FETCH_ERROR, None))
                 continue
 
-            expected_fname = f"{jpn_id}.mp3"
-            if col.media.have(expected_fname):
-                items.append((note_id, audio_field, jpn_id, AUDIO_EXISTS, expected_fname))
-                continue
-
-            tmp_path = audio_fetcher.fetch_audio_to_temp(jpn_id)
-            if tmp_path is None:
-                items.append((note_id, audio_field, jpn_id, AUDIO_NO_RECORDING, None))
+            resolved = audio_fetcher.resolve_audio(
+                jpn_id, alt_candidates, col,
+                restricted_ids=note_restricted_ids.setdefault(note_id, set()),
+                used_ids=note_used_ids.setdefault(note_id, set()),
+            )
+            if resolved is None:
+                items.append((note_id, jpn_field, trans_field, audio_field,
+                              jpn_id, AUDIO_NO_RECORDING, None))
             else:
-                items.append((note_id, audio_field, jpn_id, AUDIO_FETCHED, tmp_path))
+                items.append((note_id, jpn_field, trans_field, audio_field,
+                              jpn_id, AUDIO_RESOLVED, resolved))
         except AudioDownloadError as exc:
             logger.error("Audio download error for jpn_id %s: %s", jpn_id, exc)
-            items.append((note_id, audio_field, jpn_id, AUDIO_FETCH_ERROR, None))
-        except Exception:
+            result.audio_error_details.append(
+                f"note {note_id}, sentence {jpn_id}: {exc}"
+            )
+            items.append((note_id, jpn_field, trans_field, audio_field,
+                          jpn_id, AUDIO_FETCH_ERROR, None))
+        except Exception as exc:
             logger.exception(
                 "Unexpected error downloading audio for note %d (jpn_id %s)",
                 note_id, jpn_id,
             )
-            items.append((note_id, audio_field, jpn_id, AUDIO_FETCH_ERROR, None))
+            result.audio_error_details.append(
+                f"note {note_id}, sentence {jpn_id}: unexpected error: {exc}"
+            )
+            items.append((note_id, jpn_field, trans_field, audio_field,
+                          jpn_id, AUDIO_FETCH_ERROR, None))
     return items
 
 
@@ -205,31 +251,45 @@ def register_audio_media(items: list, result: BatchResult, col) -> list:
     (those run inside a CollectionOp so they land in a named undo entry).
 
     Consumes the outcome tuples produced by download_pending_audio():
-    - AUDIO_FETCHED: registers the temp file via register_audio_file()
-      (which owns temp cleanup even on failure) and passes it through.
-    - AUDIO_EXISTS: passes the existing filename through unchanged.
+    - AUDIO_RESOLVED: registers the temp file via register_audio_file() (which
+      owns temp cleanup even on failure) when the source is "temp", or passes
+      the existing filename through when it is "media". The sentence text is
+      carried along so apply_audio_fields() can swap the pair when the audio
+      came from a 403 re-selection. The file is stored under the resolved
+      sentence's own jpn_id.
     - AUDIO_NO_RECORDING: increments result.audio_skipped.
     - AUDIO_FETCH_ERROR: increments result.audio_errors.
     - Any unexpected exception: logs, increments audio_errors, continues.
 
     Returns:
-    - A list of (note_id, audio_field, jpn_id, fname) tuples for
-      apply_audio_fields().
+    - A list of (note_id, audio_field, jpn_id, fname, jpn_field, trans_field,
+      new_jpn_text, new_trans_text) 8-tuples for apply_audio_fields(). The last
+      four elements are None for a normal (non-reselected) item.
     """
     registered: list = []
-    for note_id, audio_field, jpn_id, status, payload in items:
+    for (note_id, jpn_field, trans_field, audio_field,
+         jpn_id, status, payload) in items:
         try:
             if status == AUDIO_FETCH_ERROR:
                 result.audio_errors += 1
             elif status == AUDIO_NO_RECORDING:
                 result.audio_skipped += 1
-            elif status == AUDIO_EXISTS:
-                registered.append((note_id, audio_field, jpn_id, payload))
-            else:  # AUDIO_FETCHED
-                fname = audio_fetcher.register_audio_file(payload, col)
-                registered.append((note_id, audio_field, jpn_id, fname))
-        except Exception:
+            else:  # AUDIO_RESOLVED
+                resolved = payload
+                if resolved.source == "media":
+                    fname = resolved.payload
+                else:
+                    fname = audio_fetcher.register_audio_file(resolved.payload, col)
+                registered.append(
+                    (note_id, audio_field, resolved.jpn_id, fname,
+                     jpn_field, trans_field,
+                     resolved.jpn_text, resolved.trans_text))
+        except Exception as exc:
             result.audio_errors += 1
+            result.audio_error_details.append(
+                f"note {note_id}, sentence {jpn_id}: failed to register audio "
+                f"file {payload!r}: {exc}"
+            )
             logger.exception(
                 "Failed to register audio media for note %d (jpn_id %s)",
                 note_id, jpn_id,
@@ -245,10 +305,15 @@ def apply_audio_fields(registered: list, result: BatchResult, col,
     run inside a CollectionOp op so the writes land in one named undo entry
     and open windows refresh afterwards.
 
-    For each (note_id, audio_field, jpn_id, fname) from register_audio_media():
+    For each (note_id, audio_field, jpn_id, fname, jpn_field, trans_field,
+    new_jpn_text, new_trans_text) from register_audio_media():
     - Writes [sound:fname] verbatim, calls col.update_note, increments
       result.audio_added.
-    - On missing audio field or any unexpected exception: logs, increments
+    - When new_jpn_text is not None (a 403 re-selection), first overwrites the
+      pair's Japanese/Translation fields with the HTML-escaped replacement text,
+      in the same update_note call so the swap is part of the audio undo entry,
+      and increments result.audio_reselected.
+    - On missing fields or any unexpected exception: logs, increments
       result.audio_errors, continues with the next item.
 
     Clears result.pending_audio after processing.
@@ -267,7 +332,8 @@ def apply_audio_fields(registered: list, result: BatchResult, col,
 
     field_names_cache: dict[int, list[str]] = {}
     applied = 0
-    for note_id, audio_field, jpn_id, fname in registered:
+    for (note_id, audio_field, jpn_id, fname,
+         jpn_field, trans_field, new_jpn_text, new_trans_text) in registered:
         try:
             note = col.get_note(note_id)
             ntid = note.mid
@@ -276,19 +342,46 @@ def apply_audio_fields(registered: list, result: BatchResult, col,
             field_names = field_names_cache[ntid]
             if audio_field not in field_names:
                 result.audio_errors += 1
+                result.audio_error_details.append(
+                    f"note {note_id}, sentence {jpn_id}: audio field "
+                    f"{audio_field!r} not found on the note type"
+                )
                 logger.warning("Audio field %r not found on note %d", audio_field, note_id)
                 continue
+
+            # 403 re-selection: swap the pair's example text as well, so the
+            # sentence the audio belongs to is the one shown. The fields were
+            # validated in run_batch, but re-check defensively.
+            if new_jpn_text is not None:
+                if jpn_field not in field_names or trans_field not in field_names:
+                    result.audio_errors += 1
+                    result.audio_error_details.append(
+                        f"note {note_id}, sentence {jpn_id}: cannot re-select — "
+                        f"field {jpn_field!r}/{trans_field!r} not found on the note type"
+                    )
+                    logger.warning(
+                        "Re-selection fields %r/%r not found on note %d",
+                        jpn_field, trans_field, note_id)
+                    continue
+                note.fields[field_names.index(jpn_field)] = html.escape(new_jpn_text)
+                note.fields[field_names.index(trans_field)] = html.escape(new_trans_text)
 
             audio_idx = field_names.index(audio_field)
             note.fields[audio_idx] = f"[sound:{fname}]"
             col.update_note(note)
             result.audio_added += 1
+            if new_jpn_text is not None:
+                result.audio_reselected += 1
             applied += 1
             # Same periodic merge as run_batch — see comment there.
             if undo_pos is not None and applied % 30 == 0:
                 col.merge_undo_entries(undo_pos)
-        except Exception:
+        except Exception as exc:
             result.audio_errors += 1
+            result.audio_error_details.append(
+                f"note {note_id}, sentence {jpn_id}: unexpected error applying "
+                f"audio field: {exc}"
+            )
             logger.exception(
                 "Unexpected error applying audio field for note %d (jpn_id %s)",
                 note_id, jpn_id,
@@ -336,6 +429,56 @@ def process_pending_audio(result: BatchResult, col) -> None:
         return
     items = download_pending_audio(result, col)
     register_pending_audio(items, result, col)
+
+
+def write_audio_error_log(result: BatchResult, log_path: "str | None" = None) -> "str | None":
+    """Append this run's audio error details to a log file.
+
+    Called on the main thread after a batch run (e.g. from the report dialog),
+    so the per-item reasons captured in result.audio_error_details survive after
+    the transient report dialog closes. Each call appends a timestamped block,
+    keeping a history across runs; only errors are written, so the file grows
+    negligibly.
+
+    Never raises: a logging failure must not break the calling UI flow. Failures
+    are logged via logger.exception and reported as a None return.
+
+    Args:
+    - result: The BatchResult whose audio_error_details are written.
+    - log_path (str | None): Destination file. When None (default), the path is
+      user_files/batch_errors.log (resolved from tatoeba_data.USER_FILES_DIR at
+      call time, so tests can redirect it).
+
+    Returns:
+    - The log file path on success, or None when there are no errors to write or
+      the write failed.
+    """
+    if not result.audio_error_details:
+        return None
+
+    if log_path is None:
+        try:
+            user_files_dir = tatoeba_data.USER_FILES_DIR
+        except Exception:
+            logger.exception("Could not resolve user_files directory for audio error log")
+            return None
+        log_path = os.path.join(user_files_dir, "batch_errors.log")
+
+    try:
+        parent = os.path.dirname(log_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        count = len(result.audio_error_details)
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write(f"=== {timestamp} — {count} audio error(s) ===\n")
+            for detail in result.audio_error_details:
+                fh.write(f"{detail}\n")
+            fh.write("\n")
+        return log_path
+    except Exception:
+        logger.exception("Could not write audio error log to %s", log_path)
+        return None
 
 
 def run_batch(
@@ -492,6 +635,16 @@ def run_batch(
                     key=lambda p: 0 if p[2] is not None else 1,
                 )
 
+                # Fallback pool for 403 re-selection: recordings the note is not
+                # already using. Only audio-bearing matches qualify (a non-audio
+                # sentence would just 404), and any sentence already selected for
+                # this note is excluded so a swap never duplicates another pair.
+                # filled_texts was already applied to `matches` above.
+                selected_jpn_ids = {m[0] for m in selected_matches}
+                alt_candidates = [
+                    (m[0], m[1], m[2]) for m in audio if m[0] not in selected_jpn_ids
+                ]
+
                 # Write HTML-escaped results. Every selected match lands in a
                 # pair: filled pairs were excluded above, so no skips remain here.
                 for match, (jpn_field, trans_field, audio_field) in zip(
@@ -502,7 +655,9 @@ def run_batch(
                     note.fields[jpn_idx] = html.escape(jpn_text)
                     note.fields[trans_idx] = html.escape(trans_text)
                     if audio_field is not None:
-                        result.pending_audio.append((jpn_id, nid, audio_field))
+                        result.pending_audio.append(
+                            (jpn_id, nid, jpn_field, trans_field, audio_field,
+                             alt_candidates))
 
                 col.update_note(note)
                 result.updated += 1

@@ -2,7 +2,7 @@
     "name": "Japanese example sentences",
     "description": "This addon adds example sentences to Japanese vocabulary cards.",
     "package": "japanese_examples",
-    "version": "1.5.0",
+    "version": "1.5.1",
     "author": "@kthys",
     "minAnkiVersion": "2.1.0",
     "files": [

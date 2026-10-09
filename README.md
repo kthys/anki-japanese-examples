@@ -69,11 +69,17 @@ Yes, for two things: single-card additions query the Tatoeba API live, and batch
 
 ### How much disk space do the downloaded datasets take, and where are they stored?
 
-Batch mode downloads per-language Tatoeba sentence exports and builds a local SQLite index. Everything is stored in the `user_files/` folder inside the add-on directory (roughly a few hundred MB per language). You can delete a language's files at any time to free space — the batch dialog will simply ask you to re-download them.
+Batch mode downloads the per-language Tatoeba sentence exports and builds a local SQLite search index from them. Each language is stored as a single file — `jpn_<lang>_index.db` — inside the add-on's `user_files/` folder (a few hundred MB per language). To free space you can delete a language's `jpn_<lang>_index.db` directly; the batch dialog will then simply ask you to re-download it.
+
+During a download the importer also needs transient free space for the compressed exports and a throwaway build directory (peak usage can reach a few GB for the largest languages), but these are cleaned up automatically once the build finishes, leaving only the finished index behind.
+
+If you are upgrading from v1.5.0 or earlier, those versions also kept a `jpn_<lang>_pairs.tsv` next to each index. The add-on now deletes those automatically on startup, reclaiming a few hundred MB per language — you do not need to do anything.
 
 ### Why is audio missing for some sentences?
 
 Audio is best-effort: only a subset of Tatoeba sentences have native-speaker recordings. In both modes the plugin prefers sentences that have recordings, but if the chosen sentence has none (or Tatoeba returns "no recording"), the audio field is simply left empty. This is expected, not an error.
+
+One exception in batch mode: when a sentence has a recording whose author restricts it to Tatoeba-only reuse (HTTP 403), the plugin tries another sentence for the same word and, only if that one's audio downloads successfully, swaps the pair's text and audio to it. If no alternative works, the original sentence stays and its audio field is left empty.
 
 ### Can I undo a batch run?
 

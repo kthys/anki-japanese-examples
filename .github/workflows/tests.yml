@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -14,20 +17,22 @@ jobs:
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:
-    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
-    
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      with:
+        persist-credentials: false
+
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v5.0.0
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
       with:
         python-version: ${{ matrix.python-version }}
-        
+
     - name: Install dependencies
       run: |
         # Pin pip version to prevent supply-chain attacks via pip itself
         python -m pip install --no-cache-dir pip==24.0
         # Install from locked requirements with exact versions
         pip install --no-cache-dir -r requirements-dev.lock
-    
+
     - name: Verify dependency integrity
       run: |
         # Audit installed packages for known security vulnerabilities
@@ -35,7 +40,7 @@ jobs:
         pip-audit --desc --skip-editable
       # Continue on audit failures to not block tests, but report issues
       continue-on-error: true
-        
+
     - name: Test with unittest
       run: |
         python -m unittest discover tests/

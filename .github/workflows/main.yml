@@ -11,19 +11,21 @@ on:
 permissions: {}
 
 jobs:
-  build_and_release:
+  build:
     runs-on: ubuntu-latest
-    # Human approval gate (release environment): the run pauses until the
-    # required reviewer approves in the GitHub UI. 
-    environment: release
+    # Read-only build stage: no write token is exposed while running the
+    # validation/ancestry checks and packaging the add-on.
     permissions:
-      contents: write
+      contents: read
+    outputs:
+      version: ${{ steps.validate_tag.outputs.version }}
     concurrency:
       group: release-${{ github.event.inputs.tag }}
       cancel-in-progress: false
 
     steps:
       - name: Validate input tag format
+        id: validate_tag
         env:
           TAG: ${{ github.event.inputs.tag }}
         run: |
@@ -34,7 +36,8 @@ jobs:
             echo "Error: Invalid version format '$TAG'. Expected format: vX.Y.Z or vX.Y.Z-prerelease"
             exit 1
           fi
-          echo "VERSION=$TAG" >> $GITHUB_ENV
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+          echo "VERSION=$TAG" >> "$GITHUB_ENV"
           echo "✓ Tag format validated: $TAG"
 
       - name: Verify tag exists in repository
@@ -48,11 +51,12 @@ jobs:
           echo "✓ Tag exists: $TAG"
 
       - name: Checkout code at tag
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event.inputs.tag }}
           # Full history needed for branch-ancestry and signature checks
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Verify tag signature (best effort / advisory)
         env:
@@ -95,7 +99,29 @@ jobs:
       - name: Build .ankiaddon file
         run: |
           # Quoted variable, value already validated (vX.Y.Z[-prerelease])
-          zip -r "japanese-examples-${VERSION}.ankiaddon" * -x "*.git*" "*.github*" ".gitignore" "README.md" "screenshots/*" "*__pycache__*" "*.pyc" "*.DS_Store" "tests/*" "requirements-dev.txt"
+          zip -r "japanese-examples-${VERSION}.ankiaddon" * -x "*.git*" "*.github*" ".gitignore" "README.md" "screenshots/*" "*__pycache__*" "*.pyc" "*.DS_Store" "tests/*" "requirements-dev.txt" "requirements-dev.lock" "SECURITY-DEPENDENCIES.md"
+
+      - name: Upload addon artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: addon
+          path: japanese-examples-*.ankiaddon
+          if-no-files-found: error
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    # Human approval gate (release environment): the run pauses until the
+    # required reviewer approves in the GitHub UI.
+    environment: release
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download addon artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: addon
 
       - name: Create Release
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
@@ -103,9 +129,9 @@ jobs:
           # REQUIRED with workflow_dispatch: github.ref is the branch, not the
           # tag — without tag_name the release would be created on a tag named
           # like the branch (e.g. "main") instead of vX.Y.Z.
-          tag_name: ${{ env.VERSION }}
-          files: ./japanese-examples-${{ env.VERSION }}.ankiaddon
-          name: ${{ env.VERSION }}
+          tag_name: ${{ needs.build.outputs.version }}
+          files: ./japanese-examples-${{ needs.build.outputs.version }}.ankiaddon
+          name: ${{ needs.build.outputs.version }}
           draft: false
           prerelease: false
           generate_release_notes: true

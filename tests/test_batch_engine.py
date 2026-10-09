@@ -1,7 +1,7 @@
 import sys
 import os
 import unittest
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 import tempfile
 
 # Add parent directory to path
@@ -16,7 +16,7 @@ sys.modules['aqt.qt'] = MagicMock()
 # Import freshly
 import src.core.batch_engine as batch_engine
 from src.core.batch_engine import BatchResult, process_pending_audio
-from src.core.audio_fetcher import AudioDownloadError
+from src.core.audio_fetcher import AudioDownloadError, ResolvedAudio
 
 
 class TestBatchResult(unittest.TestCase):
@@ -313,10 +313,11 @@ class TestRunBatch(unittest.TestCase):
 
         self.assertEqual(result.updated, 1)
         self.assertEqual(len(result.pending_audio), 1)
-        jpn_id, note_id, audio_field = result.pending_audio[0]
+        jpn_id, note_id, _jpn_field, _trans_field, audio_field, alt = result.pending_audio[0]
         self.assertEqual(jpn_id, "555")
         self.assertEqual(note_id, 1)
         self.assertEqual(audio_field, "ExampleAudio")
+        self.assertEqual(alt, [])
 
     @patch('src.core.batch_engine.tatoeba_data')
     def test_run_batch_no_audio_field_leaves_pending_audio_empty(self, mock_td):
@@ -348,6 +349,7 @@ class TestBatchResultAudioFields(unittest.TestCase):
         self.assertEqual(result.audio_added, 0)
         self.assertEqual(result.audio_skipped, 0)
         self.assertEqual(result.audio_errors, 0)
+        self.assertEqual(result.audio_reselected, 0)
 
     def test_pending_audio_defaults_empty(self):
         result = BatchResult()
@@ -356,8 +358,18 @@ class TestBatchResultAudioFields(unittest.TestCase):
     def test_pending_audio_not_shared(self):
         r1 = BatchResult()
         r2 = BatchResult()
-        r1.pending_audio.append(("123", 1, "Audio"))
+        r1.pending_audio.append(("123", 1, None, None, "Audio", []))
         self.assertEqual(len(r2.pending_audio), 0)
+
+    def test_audio_error_details_defaults_empty(self):
+        result = BatchResult()
+        self.assertEqual(result.audio_error_details, [])
+
+    def test_audio_error_details_not_shared(self):
+        r1 = BatchResult()
+        r2 = BatchResult()
+        r1.audio_error_details.append("boom")
+        self.assertEqual(len(r2.audio_error_details), 0)
 
     def test_total_processed_excludes_audio_counters(self):
         result = BatchResult(
@@ -380,10 +392,10 @@ class TestProcessPendingAudio(unittest.TestCase):
 
     @patch('src.core.batch_engine.audio_fetcher')
     def test_successful_download_writes_sound_tag(self, mock_af):
-        """Successful download writes [sound:fname] verbatim and increments audio_added."""
-        mock_af.fetch_audio_to_temp.return_value = "/tmp/x/12345.mp3"
+        """A resolved temp download writes [sound:fname] and increments audio_added."""
+        mock_af.resolve_audio.return_value = ResolvedAudio(
+            "12345", None, None, "temp", "/tmp/x/12345.mp3")
         mock_af.register_audio_file.return_value = "12345.mp3"
-        mock_af.AudioDownloadError = AudioDownloadError
 
         note = self._make_mock_note(
             {"Word": "猫", "Audio": ""},
@@ -394,21 +406,23 @@ class TestProcessPendingAudio(unittest.TestCase):
         col.media.have.return_value = False
 
         result = BatchResult()
-        result.pending_audio.append(("12345", 1, "Audio"))
+        result.pending_audio.append(("12345", 1, None, None, "Audio", []))
 
         process_pending_audio(result, col)
 
         self.assertEqual(result.audio_added, 1)
         self.assertEqual(result.audio_skipped, 0)
         self.assertEqual(result.audio_errors, 0)
+        self.assertEqual(result.audio_reselected, 0)
         self.assertEqual(note.fields[1], "[sound:12345.mp3]")
         col.update_note.assert_called_once_with(note)
         self.assertEqual(result.pending_audio, [])
 
     @patch('src.core.batch_engine.audio_fetcher')
     def test_already_registered_file_skips_download(self, mock_af):
-        """File already in col.media: tag written without fetching, audio_added incremented."""
-        mock_af.AudioDownloadError = AudioDownloadError
+        """A media-source resolution writes the tag without registering a file."""
+        mock_af.resolve_audio.return_value = ResolvedAudio(
+            "12345", None, None, "media", "12345.mp3")
 
         note = self._make_mock_note({"Audio": ""}, field_order=["Audio"])
         col = MagicMock()
@@ -416,21 +430,20 @@ class TestProcessPendingAudio(unittest.TestCase):
         col.media.have.return_value = True
 
         result = BatchResult()
-        result.pending_audio.append(("12345", 1, "Audio"))
+        result.pending_audio.append(("12345", 1, None, None, "Audio", []))
         process_pending_audio(result, col)
 
         self.assertEqual(result.audio_added, 1)
         self.assertEqual(note.fields[0], "[sound:12345.mp3]")
-        mock_af.fetch_audio_to_temp.assert_not_called()
         mock_af.register_audio_file.assert_not_called()
 
     @patch('src.core.batch_engine.audio_fetcher')
     def test_sound_tag_not_html_escaped(self, mock_af):
         """[sound:] tag must be written verbatim — not passed through html.escape."""
         import html
-        mock_af.fetch_audio_to_temp.return_value = "/tmp/x/12345.mp3"
+        mock_af.resolve_audio.return_value = ResolvedAudio(
+            "12345", None, None, "temp", "/tmp/x/12345.mp3")
         mock_af.register_audio_file.return_value = "12345.mp3"
-        mock_af.AudioDownloadError = AudioDownloadError
 
         note = self._make_mock_note({"Audio": ""}, field_order=["Audio"])
         col = MagicMock()
@@ -438,7 +451,7 @@ class TestProcessPendingAudio(unittest.TestCase):
         col.media.have.return_value = False
 
         result = BatchResult()
-        result.pending_audio.append(("12345", 1, "Audio"))
+        result.pending_audio.append(("12345", 1, None, None, "Audio", []))
         process_pending_audio(result, col)
 
         self.assertEqual(note.fields[0], "[sound:12345.mp3]")
@@ -446,10 +459,9 @@ class TestProcessPendingAudio(unittest.TestCase):
         self.assertEqual(html.escape(note.fields[0]), note.fields[0])
 
     @patch('src.core.batch_engine.audio_fetcher')
-    def test_404_increments_audio_skipped(self, mock_af):
-        """fetch returning None (404) increments audio_skipped; no update_note call."""
-        mock_af.fetch_audio_to_temp.return_value = None
-        mock_af.AudioDownloadError = AudioDownloadError
+    def test_no_recording_increments_audio_skipped(self, mock_af):
+        """A None resolution increments audio_skipped; no update_note call."""
+        mock_af.resolve_audio.return_value = None
 
         note = self._make_mock_note({"Audio": ""}, field_order=["Audio"])
         col = MagicMock()
@@ -457,7 +469,7 @@ class TestProcessPendingAudio(unittest.TestCase):
         col.media.have.return_value = False
 
         result = BatchResult()
-        result.pending_audio.append(("99999", 1, "Audio"))
+        result.pending_audio.append(("99999", 1, None, None, "Audio", []))
         process_pending_audio(result, col)
 
         self.assertEqual(result.audio_skipped, 1)
@@ -467,10 +479,10 @@ class TestProcessPendingAudio(unittest.TestCase):
         self.assertEqual(result.pending_audio, [])
 
     @patch('src.core.batch_engine.audio_fetcher')
-    def test_audio_download_error_increments_audio_errors(self, mock_af):
-        """AudioDownloadError increments audio_errors; audio field left empty."""
-        mock_af.fetch_audio_to_temp.side_effect = AudioDownloadError("Connection refused")
-        mock_af.AudioDownloadError = AudioDownloadError
+    def test_resolve_audio_receives_candidates_and_shared_per_note_sets(self, mock_af):
+        """download_pending_audio delegates re-selection to resolve_audio and
+        reuses the same restricted/used sets for every pair of a note."""
+        mock_af.resolve_audio.return_value = None
 
         note = self._make_mock_note({"Audio": ""}, field_order=["Audio"])
         col = MagicMock()
@@ -478,7 +490,32 @@ class TestProcessPendingAudio(unittest.TestCase):
         col.media.have.return_value = False
 
         result = BatchResult()
-        result.pending_audio.append(("11111", 1, "Audio"))
+        result.pending_audio.append(
+            ("p1", 1, "Jpn", "Trans", "Audio", [("alt1", "猫B。", "Cat B.")]))
+        result.pending_audio.append(
+            ("p2", 1, "Jpn", "Trans", "Audio", [("alt1", "猫B。", "Cat B.")]))
+        process_pending_audio(result, col)
+
+        calls = mock_af.resolve_audio.call_args_list
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0].args[0], "p1")
+        self.assertEqual(calls[0].args[1], [("alt1", "猫B。", "Cat B.")])
+        # Same note -> the same per-note bookkeeping sets are shared.
+        self.assertIs(calls[0].kwargs["restricted_ids"], calls[1].kwargs["restricted_ids"])
+        self.assertIs(calls[0].kwargs["used_ids"], calls[1].kwargs["used_ids"])
+
+    @patch('src.core.batch_engine.audio_fetcher')
+    def test_audio_download_error_increments_audio_errors(self, mock_af):
+        """AudioDownloadError increments audio_errors; audio field left empty."""
+        mock_af.resolve_audio.side_effect = AudioDownloadError("Connection refused")
+
+        note = self._make_mock_note({"Audio": ""}, field_order=["Audio"])
+        col = MagicMock()
+        col.get_note.return_value = note
+        col.media.have.return_value = False
+
+        result = BatchResult()
+        result.pending_audio.append(("11111", 1, None, None, "Audio", []))
         process_pending_audio(result, col)
 
         self.assertEqual(result.audio_errors, 1)
@@ -486,32 +523,36 @@ class TestProcessPendingAudio(unittest.TestCase):
         self.assertEqual(note.fields[0], "")
         col.update_note.assert_not_called()
         self.assertEqual(result.pending_audio, [])
+        # Reason is captured for the persistent error log.
+        self.assertEqual(len(result.audio_error_details), 1)
+        self.assertIn("11111", result.audio_error_details[0])
+        self.assertIn("Connection refused", result.audio_error_details[0])
 
     @patch('src.core.batch_engine.audio_fetcher')
     def test_missing_audio_field_increments_audio_errors(self, mock_af):
         """Audio field not on note type increments audio_errors without fetching."""
-        mock_af.AudioDownloadError = AudioDownloadError
-
         note = self._make_mock_note({"Word": "猫"}, field_order=["Word"])
         col = MagicMock()
         col.get_note.return_value = note
         col.media.have.return_value = False
 
         result = BatchResult()
-        result.pending_audio.append(("12345", 1, "NonexistentAudioField"))
+        result.pending_audio.append(("12345", 1, None, None, "NonexistentAudioField", []))
         process_pending_audio(result, col)
 
         self.assertEqual(result.audio_errors, 1)
-        mock_af.fetch_audio_to_temp.assert_not_called()
+        mock_af.resolve_audio.assert_not_called()
         self.assertEqual(result.pending_audio, [])
+        self.assertEqual(len(result.audio_error_details), 1)
+        self.assertIn("NonexistentAudioField", result.audio_error_details[0])
 
     @patch('src.core.batch_engine.audio_fetcher')
     def test_unexpected_error_does_not_abort_remaining_items(self, mock_af):
         """A non-AudioDownloadError failure on one item counts as audio_errors
         and processing continues with the remaining items."""
-        mock_af.fetch_audio_to_temp.return_value = "/tmp/x/22222.mp3"
+        mock_af.resolve_audio.return_value = ResolvedAudio(
+            "22222", None, None, "temp", "/tmp/x/22222.mp3")
         mock_af.register_audio_file.return_value = "22222.mp3"
-        mock_af.AudioDownloadError = AudioDownloadError
 
         good_note = self._make_mock_note({"Audio": ""}, field_order=["Audio"])
         col = MagicMock()
@@ -525,21 +566,22 @@ class TestProcessPendingAudio(unittest.TestCase):
         col.get_note.side_effect = get_note
 
         result = BatchResult()
-        result.pending_audio.append(("11111", 1, "Audio"))
-        result.pending_audio.append(("22222", 2, "Audio"))
+        result.pending_audio.append(("11111", 1, None, None, "Audio", []))
+        result.pending_audio.append(("22222", 2, None, None, "Audio", []))
         process_pending_audio(result, col)
 
         self.assertEqual(result.audio_errors, 1)
         self.assertEqual(result.audio_added, 1)
         self.assertEqual(good_note.fields[0], "[sound:22222.mp3]")
         self.assertEqual(result.pending_audio, [])
+        self.assertEqual(len(result.audio_error_details), 1)
+        self.assertIn("11111", result.audio_error_details[0])
 
     @patch('src.core.batch_engine.audio_fetcher')
     def test_download_phase_reports_progress(self, mock_af):
         """download_pending_audio calls progress_cb(current, total) per item."""
         from src.core.batch_engine import download_pending_audio
-        mock_af.fetch_audio_to_temp.return_value = None
-        mock_af.AudioDownloadError = AudioDownloadError
+        mock_af.resolve_audio.return_value = None
 
         note = self._make_mock_note({"Audio": ""}, field_order=["Audio"])
         col = MagicMock()
@@ -547,8 +589,8 @@ class TestProcessPendingAudio(unittest.TestCase):
         col.media.have.return_value = False
 
         result = BatchResult()
-        result.pending_audio.append(("1", 1, "Audio"))
-        result.pending_audio.append(("2", 2, "Audio"))
+        result.pending_audio.append(("1", 1, None, None, "Audio", []))
+        result.pending_audio.append(("2", 2, None, None, "Audio", []))
 
         calls = []
         download_pending_audio(result, col, progress_cb=lambda c, t: calls.append((c, t)))
@@ -558,12 +600,119 @@ class TestProcessPendingAudio(unittest.TestCase):
         self.assertEqual(len(result.pending_audio), 2)
 
     @patch('src.core.batch_engine.audio_fetcher')
+    def test_reselected_resolution_swaps_text_and_audio(self, mock_af):
+        """A resolution carrying replacement text swaps the pair's text + audio."""
+        mock_af.resolve_audio.return_value = ResolvedAudio(
+            "alt1", "猫B。", "Cat B.", "temp", "/tmp/x/alt1.mp3")
+        mock_af.register_audio_file.return_value = "alt1.mp3"
+
+        note = self._make_mock_note(
+            {"Word": "猫", "Jpn": "猫A。", "Trans": "Cat A.", "Audio": ""},
+            field_order=["Word", "Jpn", "Trans", "Audio"])
+        col = MagicMock()
+        col.get_note.return_value = note
+        col.media.have.return_value = False
+
+        result = BatchResult()
+        result.pending_audio.append(
+            ("primary", 1, "Jpn", "Trans", "Audio",
+             [("alt1", "猫B。", "Cat B.")]))
+        process_pending_audio(result, col)
+
+        self.assertEqual(result.audio_reselected, 1)
+        self.assertEqual(result.audio_added, 1)
+        self.assertEqual(result.audio_skipped, 0)
+        self.assertEqual(note.fields[1], "猫B。")
+        self.assertEqual(note.fields[2], "Cat B.")
+        self.assertEqual(note.fields[3], "[sound:alt1.mp3]")
+        col.update_note.assert_called_once_with(note)
+
+    @patch('src.core.batch_engine.audio_fetcher')
+    def test_no_resolution_keeps_text_and_skips(self, mock_af):
+        """When re-selection finds nothing usable, the original sentence stays."""
+        mock_af.resolve_audio.return_value = None
+
+        note = self._make_mock_note(
+            {"Word": "猫", "Jpn": "猫A。", "Trans": "Cat A.", "Audio": ""},
+            field_order=["Word", "Jpn", "Trans", "Audio"])
+        col = MagicMock()
+        col.get_note.return_value = note
+        col.media.have.return_value = False
+
+        result = BatchResult()
+        result.pending_audio.append(
+            ("primary", 1, "Jpn", "Trans", "Audio",
+             [("alt1", "猫B。", "Cat B."), ("alt2", "猫C。", "Cat C.")]))
+        process_pending_audio(result, col)
+
+        self.assertEqual(result.audio_reselected, 0)
+        self.assertEqual(result.audio_added, 0)
+        self.assertEqual(result.audio_skipped, 1)
+        self.assertEqual(note.fields[1], "猫A。")
+        self.assertEqual(note.fields[2], "Cat A.")
+        self.assertEqual(note.fields[3], "")
+        col.update_note.assert_not_called()
+
+    @patch('src.core.batch_engine.audio_fetcher')
+    def test_media_source_resolution_swaps_without_registering(self, mock_af):
+        """A media-source re-selection swaps the text and reuses the stored filename."""
+        mock_af.resolve_audio.return_value = ResolvedAudio(
+            "alt1", "猫B。", "Cat B.", "media", "alt1.mp3")
+
+        note = self._make_mock_note(
+            {"Word": "猫", "Jpn": "猫A。", "Trans": "Cat A.", "Audio": ""},
+            field_order=["Word", "Jpn", "Trans", "Audio"])
+        col = MagicMock()
+        col.get_note.return_value = note
+        col.media.have.return_value = True
+
+        result = BatchResult()
+        result.pending_audio.append(
+            ("primary", 1, "Jpn", "Trans", "Audio",
+             [("alt1", "猫B。", "Cat B.")]))
+        process_pending_audio(result, col)
+
+        self.assertEqual(result.audio_reselected, 1)
+        self.assertEqual(note.fields[1], "猫B。")
+        self.assertEqual(note.fields[3], "[sound:alt1.mp3]")
+        mock_af.register_audio_file.assert_not_called()
+
+    @patch('src.core.batch_engine.audio_fetcher')
+    def test_mixed_resolutions_only_swap_the_reselected_pair(self, mock_af):
+        """One pair resolves to a replacement; the other finds nothing and is skipped."""
+        mock_af.resolve_audio.side_effect = [
+            ResolvedAudio("alt1", "共通。", "Shared.", "temp", "/tmp/x/alt1.mp3"),
+            None,
+        ]
+        mock_af.register_audio_file.return_value = "alt1.mp3"
+
+        note = self._make_mock_note(
+            {"Word": "猫", "Jpn1": "", "Trans1": "", "Audio1": "",
+             "Jpn2": "", "Trans2": "", "Audio2": ""},
+            field_order=["Word", "Jpn1", "Trans1", "Audio1", "Jpn2", "Trans2", "Audio2"])
+        col = MagicMock()
+        col.get_note.return_value = note
+        col.media.have.return_value = False
+
+        shared_alts = [("alt1", "共通。", "Shared.")]
+        result = BatchResult()
+        result.pending_audio.append(("p1", 1, "Jpn1", "Trans1", "Audio1", shared_alts))
+        result.pending_audio.append(("p2", 1, "Jpn2", "Trans2", "Audio2", shared_alts))
+        process_pending_audio(result, col)
+
+        self.assertEqual(result.audio_reselected, 1)
+        self.assertEqual(result.audio_skipped, 1)
+        # Only the first pair swapped; the second found no unused alternative.
+        self.assertEqual(note.fields[1], "共通。")
+        self.assertEqual(note.fields[4], "")
+        col.update_note.assert_called_once_with(note)
+
+    @patch('src.core.batch_engine.audio_fetcher')
     def test_media_phase_registers_temp_and_apply_errors_are_contained(self, mock_af):
         """register_audio_media hands the temp to register_audio_file (which
         owns cleanup); an apply-phase failure counts as audio_errors without
         aborting other items."""
-        from src.core.batch_engine import register_pending_audio, AUDIO_FETCHED
-        mock_af.AudioDownloadError = AudioDownloadError
+        from src.core.batch_engine import register_pending_audio, AUDIO_RESOLVED
         mock_af.register_audio_file.side_effect = ["11111.mp3", "22222.mp3"]
 
         good_note = self._make_mock_note({"Audio": ""}, field_order=["Audio"])
@@ -577,8 +726,10 @@ class TestProcessPendingAudio(unittest.TestCase):
 
         result = BatchResult()
         items = [
-            (1, "Audio", "11111", AUDIO_FETCHED, "/tmp/x/11111.mp3"),
-            (2, "Audio", "22222", AUDIO_FETCHED, "/tmp/x/22222.mp3"),
+            (1, None, None, "Audio", "11111", AUDIO_RESOLVED,
+             ResolvedAudio("11111", None, None, "temp", "/tmp/x/11111.mp3")),
+            (2, None, None, "Audio", "22222", AUDIO_RESOLVED,
+             ResolvedAudio("22222", None, None, "temp", "/tmp/x/22222.mp3")),
         ]
         register_pending_audio(items, result, col)
 
@@ -588,6 +739,97 @@ class TestProcessPendingAudio(unittest.TestCase):
         self.assertEqual(result.audio_errors, 1)
         self.assertEqual(result.audio_added, 1)
         self.assertEqual(good_note.fields[0], "[sound:22222.mp3]")
+        self.assertEqual(len(result.audio_error_details), 1)
+        self.assertIn("11111", result.audio_error_details[0])
+
+
+
+class TestWriteAudioErrorLog(unittest.TestCase):
+    """Tests for write_audio_error_log() — the persistent batch error log."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def test_no_details_returns_none_and_writes_nothing(self):
+        """A clean run must not create or touch the log file."""
+        from src.core.batch_engine import write_audio_error_log
+        result = BatchResult()
+        log_path = os.path.join(self.tmp_dir, "batch_errors.log")
+        self.assertIsNone(write_audio_error_log(result, log_path=log_path))
+        self.assertFalse(os.path.exists(log_path))
+
+    def test_writes_header_and_details(self):
+        """Details and a count header are written; the path is returned."""
+        from src.core.batch_engine import write_audio_error_log
+        result = BatchResult()
+        result.audio_error_details.append("note 1, sentence 11111: Connection refused")
+        log_path = os.path.join(self.tmp_dir, "batch_errors.log")
+
+        returned = write_audio_error_log(result, log_path=log_path)
+
+        self.assertEqual(returned, log_path)
+        with open(log_path, encoding="utf-8") as fh:
+            content = fh.read()
+        self.assertIn("1 audio error(s)", content)
+        self.assertIn("note 1, sentence 11111: Connection refused", content)
+
+    def test_appends_across_runs(self):
+        """A second run appends a new block instead of overwriting history."""
+        from src.core.batch_engine import write_audio_error_log
+        log_path = os.path.join(self.tmp_dir, "batch_errors.log")
+        r1 = BatchResult()
+        r1.audio_error_details.append("first failure")
+        r2 = BatchResult()
+        r2.audio_error_details.append("second failure")
+
+        write_audio_error_log(r1, log_path=log_path)
+        write_audio_error_log(r2, log_path=log_path)
+
+        with open(log_path, encoding="utf-8") as fh:
+            content = fh.read()
+        self.assertEqual(content.count("audio error(s) ==="), 2)
+        self.assertIn("first failure", content)
+        self.assertIn("second failure", content)
+
+    def test_creates_missing_directory(self):
+        """Nested destination directories are created on demand."""
+        from src.core.batch_engine import write_audio_error_log
+        result = BatchResult()
+        result.audio_error_details.append("x")
+        nested = os.path.join(self.tmp_dir, "sub", "dir", "batch_errors.log")
+
+        self.assertEqual(write_audio_error_log(result, log_path=nested), nested)
+        self.assertTrue(os.path.exists(nested))
+
+    def test_write_failure_returns_none(self):
+        """An I/O failure is contained and reported as None — never raised."""
+        from src.core.batch_engine import write_audio_error_log
+        blocker = os.path.join(self.tmp_dir, "blocker")
+        with open(blocker, "w") as fh:
+            fh.write("x")
+        result = BatchResult()
+        result.audio_error_details.append("x")
+        # Parent "directory" is actually a file, so makedirs/open must fail.
+        log_path = os.path.join(blocker, "batch_errors.log")
+
+        self.assertIsNone(write_audio_error_log(result, log_path=log_path))
+
+    def test_default_path_uses_user_files_dir(self):
+        """Without an explicit path, the log lands in user_files/batch_errors.log."""
+        from src.core.batch_engine import write_audio_error_log
+        import src.core.batch_engine as be
+        result = BatchResult()
+        result.audio_error_details.append("x")
+
+        with patch.object(be.tatoeba_data, "USER_FILES_DIR", self.tmp_dir):
+            returned = write_audio_error_log(result)
+
+        self.assertEqual(returned, os.path.join(self.tmp_dir, "batch_errors.log"))
+        self.assertTrue(os.path.exists(returned))
 
 
 class TestUndoBracketing(unittest.TestCase):
@@ -663,9 +905,9 @@ class TestUndoBracketing(unittest.TestCase):
         col.merge_undo_entries.return_value = "AUDIOCHANGES"
 
         result = BatchResult()
-        result.pending_audio.append(("111", 1, "Audio"))
+        result.pending_audio.append(("111", 1, None, None, "Audio", []))
         changes = apply_audio_fields(
-            [(1, "Audio", "111", "111.mp3")], result, col,
+            [(1, "Audio", "111", "111.mp3", None, None, None, None)], result, col,
             undo_name="Add example audio")
 
         col.add_custom_undo_entry.assert_called_once_with("Add example audio")
@@ -828,7 +1070,7 @@ class TestPerPairSkipLogic(unittest.TestCase):
         )
 
         self.assertEqual(len(result.pending_audio), 1)
-        self.assertEqual(result.pending_audio[0][2], "Audio2")
+        self.assertEqual(result.pending_audio[0][4], "Audio2")
 
     @patch('src.core.batch_engine.tatoeba_data')
     def test_skip_existing_per_pair_no_update_note_when_all_skipped(self, mock_td):
@@ -1184,13 +1426,57 @@ class TestAudioPrioritizationSelection(unittest.TestCase):
             "Audio sentence text must be placed in the audio-configured pair (Jpn2)")
         # Audio2 must be queued with the same sentence ID as the text in Jpn2
         self.assertEqual(len(result.pending_audio), 1)
-        queued_jpn_id, _note_id, queued_audio_field = result.pending_audio[0]
+        (queued_jpn_id, _note_id, queued_jpn_field, queued_trans_field,
+         queued_audio_field, _alts) = result.pending_audio[0]
         self.assertEqual(queued_jpn_id, "A1",
             "Audio field must be queued with the audio sentence's jpn_id")
         self.assertEqual(queued_audio_field, "Audio2")
+        self.assertEqual(queued_jpn_field, "Jpn2")
+        self.assertEqual(queued_trans_field, "Trans2")
         # Jpn1 (no audio pair) must have a non-audio sentence
         self.assertIn(note.fields[1], {"普通A。", "普通B。"},
             "Pair without audio field should receive a non-audio sentence")
+
+    @patch('src.core.batch_engine.tatoeba_data')
+    def test_run_batch_pending_audio_carries_alt_pool(self, mock_td):
+        """Each audio pair is queued with the unselected audio sentences as a
+        403 re-selection pool; non-audio matches and selected sentences are excluded."""
+        mock_td.get_db_path.return_value = self.temp_db_path
+        mock_td.search_word.return_value = [
+            ("A1", "音声A。", "Audio A.", 1),
+            ("A2", "音声B。", "Audio B.", 1),
+            ("A3", "音声C。", "Audio C.", 1),
+            ("N1", "普通。", "Normal.", 0),
+        ]
+
+        field_order = ["Word", "Jpn1", "Trans1", "Audio1", "Jpn2", "Trans2", "Audio2"]
+        note = self._make_mock_note(
+            {"Word": "例", "Jpn1": "", "Trans1": "", "Audio1": "",
+             "Jpn2": "", "Trans2": "", "Audio2": ""},
+            field_order,
+        )
+        col = self._make_mock_col([1], {1: note})
+
+        import random as _random
+        _random.seed(0)
+        result = batch_engine.run_batch(
+            col=col, deck_id=1, lang_code="eng",
+            source_field="Word",
+            dest_field_pairs=[("Jpn1", "Trans1", "Audio1"), ("Jpn2", "Trans2", "Audio2")],
+            skip_existing=False,
+        )
+
+        self.assertEqual(len(result.pending_audio), 2)
+        selected = {entry[0] for entry in result.pending_audio}
+        # Three audio candidates, two pairs: exactly one is left as the pool.
+        for entry in result.pending_audio:
+            alt = entry[5]
+            self.assertEqual(len(alt), 1)
+            self.assertNotIn(alt[0][0], selected)          # not a selected sentence
+            self.assertIn(alt[0][0], {"A1", "A2", "A3"})   # audio-bearing only
+            # jpn/trans field names are carried for the eventual text swap.
+            self.assertEqual(entry[2], "Jpn1" if entry[4] == "Audio1" else "Jpn2")
+            self.assertEqual(entry[3], "Trans1" if entry[4] == "Audio1" else "Trans2")
 
 
 class TestBuildDeckSearch(unittest.TestCase):

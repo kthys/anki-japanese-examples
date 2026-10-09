@@ -1,5 +1,19 @@
 # Japanese Examples - Changelog
 
+## v1.5.1 Update
+
+Downloading a language for batch mode is now much lighter on your computer.
+
+- **Improvement:** Even the biggest languages download without slowing Anki down, so you can keep using it while you wait.
+- **Improvement:** If a download gets interrupted, the add-on tries again on its own. If it still can't finish, everything you already had stays safe and unchanged.
+- **Improvement:** When audio downloads fail during batch processing, the report now points you to a log file with the full details.
+- **Improvement:** When a recording can't be reused outside of Tatoeba (HTTP 403), batch mode now tries another sentence for the same word and swaps it in only if its audio actually downloads — so more cards end up with a recording instead of an empty audio field.
+- **Fix:** Recordings whose authors restrict them to Tatoeba are now skipped like missing recordings instead of being reported as download errors.
+- **Fix:** In manual mode, your example and translation fields are now checked before contacting Tatoeba, so a misconfigured note type is reported immediately instead of after a search.
+- **Housekeeping:** Files left behind by older versions are now cleaned up automatically, freeing up space on your computer.
+
+**Thank you for using the Japanese Examples add-on!**
+
 ## v1.5.0 Update
 Example sentences are no longer limited to English and French! The add-on now supports Spanish, Chinese (simplified), and Korean — in the manual picker and in batch mode — and the whole interface is translated into those three languages.
 
@@ -8,6 +22,8 @@ Example sentences are no longer limited to English and French! The add-on now su
 - **New Feature:** "Test Connection" button in the settings — verify that the Tatoeba API is reachable from your machine.
 - **Improvement:** Supported languages are now defined in a single registry, so adding more languages is much easier in the future.
 - **Housekeeping:** Removed the deprecated in-memory `load_index` code path (superseded by the SQLite index since v1.3.0).
+
+**Thank you for using the Japanese Examples add-on!**
 
 ## v1.4.0 Update
 Audio is here! Example sentences can now come with their native-speaker recordings from Tatoeba, in both manual and batch mode.
