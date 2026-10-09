@@ -231,6 +231,94 @@ class TestGUIAsync(unittest.TestCase):
 
         mock_showInfo.assert_called_once()
 
+    # ── Missing destination fields: fail fast ───────────────────────
+
+    def _make_abort_editor(self):
+        """Editor whose note type lacks the configured destination fields."""
+        editor = MagicMock()
+        editor.web.editor.currentField = 0
+        editor.note.fields = ['test_word', '', '']
+        editor.note.note_type.return_value = {
+            'flds': [{'name': 'Expression'}, {'name': 'Meaning'}, {'name': 'Reading'}]
+        }
+        return editor
+
+    @patch('src.ui.GUI.showInfo')
+    @patch('src.ui.GUI.create_custom_dialog')
+    @patch('src.ui.GUI.find_japanese_sentence')
+    def test_missing_japanese_field_aborts_before_dialog_and_search(
+            self, mock_find, mock_dialog, mock_showInfo):
+        """A missing Japanese destination field stops the flow on click."""
+        editor = self._make_abort_editor()
+        self.mock_config['japaneseDstField'] = 'MissingJapanese'
+
+        self.GUI.add_example_manually_dialog(editor)
+
+        mock_showInfo.assert_called_once_with(
+            self.GUI._("no_valid_dst_fields").format(
+                missing="'MissingJapanese' (Japanese)",
+                available="Expression, Meaning, Reading",
+            )
+        )
+        mock_dialog.assert_not_called()
+        mock_find.assert_not_called()
+        self.mock_operations.QueryOp.assert_not_called()
+
+    @patch('src.ui.GUI.showInfo')
+    @patch('src.ui.GUI.create_custom_dialog')
+    @patch('src.ui.GUI.find_japanese_sentence')
+    def test_missing_translation_field_aborts_before_dialog_and_search(
+            self, mock_find, mock_dialog, mock_showInfo):
+        """A missing translation destination field stops the flow on click."""
+        editor = self._make_abort_editor()
+        self.mock_config['translationDstField'] = 'MissingMeaning'
+
+        self.GUI.add_example_manually_dialog(editor)
+
+        mock_showInfo.assert_called_once_with(
+            self.GUI._("no_valid_dst_fields").format(
+                missing="'MissingMeaning' (Translation)",
+                available="Expression, Meaning, Reading",
+            )
+        )
+        mock_dialog.assert_not_called()
+        mock_find.assert_not_called()
+        self.mock_operations.QueryOp.assert_not_called()
+
+    @patch('src.ui.GUI.showInfo')
+    @patch('src.ui.GUI.create_custom_dialog')
+    @patch('src.ui.GUI.find_japanese_sentence')
+    def test_missing_both_fields_lists_both(
+            self, mock_find, mock_dialog, mock_showInfo):
+        """Both missing fields are named in the message."""
+        editor = self._make_abort_editor()
+        self.mock_config['japaneseDstField'] = 'MissingJapanese'
+        self.mock_config['translationDstField'] = 'MissingMeaning'
+
+        self.GUI.add_example_manually_dialog(editor)
+
+        message = mock_showInfo.call_args[0][0]
+        self.assertIn("'MissingJapanese' (Japanese)", message)
+        self.assertIn("'MissingMeaning' (Translation)", message)
+        mock_find.assert_not_called()
+        self.mock_operations.QueryOp.assert_not_called()
+
+    @patch('src.ui.GUI.showInfo')
+    @patch('src.ui.GUI.create_custom_dialog')
+    @patch('src.ui.GUI.find_japanese_sentence')
+    def test_unreadable_note_type_aborts_with_missing_message(
+            self, mock_find, mock_dialog, mock_showInfo):
+        """A note type that cannot be read degrades to the missing message."""
+        editor = self._make_abort_editor()
+        editor.note.note_type.side_effect = AttributeError("no note type")
+
+        self.GUI.add_example_manually_dialog(editor)
+
+        mock_showInfo.assert_called_once()
+        mock_find.assert_not_called()
+        self.mock_operations.QueryOp.assert_not_called()
+
+
 class TestGUIAudioField(unittest.TestCase):
 
     def setUp(self):
@@ -479,6 +567,22 @@ class TestGUIAudioField(unittest.TestCase):
         self._run_flow(editor, examples_sentences)
 
         self.mock_audio_fetcher.resolve_audio.assert_not_called()
+
+    @patch('src.ui.GUI.showInfo')
+    def test_missing_pair_field_skips_audio_probe(self, mock_showInfo):
+        """With a required destination field missing, no search or probe runs."""
+        self.mock_config['japaneseDstField'] = 'MissingJapanese'
+        examples_sentences = [
+            {'jp_sentence': 'JP1', 'tr_sentence': 'TR1', 'jpn_id': '8858176', 'has_audio': True}
+        ]
+        editor = self._make_editor()
+        with patch('src.ui.GUI.find_japanese_sentence', return_value=examples_sentences), \
+             patch('src.ui.GUI.create_custom_dialog'):
+            self.GUI.add_example_manually_dialog(editor)
+
+        self.mock_audio_fetcher.resolve_audio.assert_not_called()
+        self.mock_operations.QueryOp.assert_not_called()
+        mock_showInfo.assert_called_once()
 
 
 if __name__ == '__main__':

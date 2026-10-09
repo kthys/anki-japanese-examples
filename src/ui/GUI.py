@@ -233,6 +233,61 @@ def get_current_deck_id(editor):
 
     return None
 
+
+def get_note_field_names(note):
+    """
+    Return the current note type's field names, or an empty list when the note
+    type metadata is unavailable.
+
+    Args:
+    - note (Note): The note whose note type field names should be read.
+
+    Returns:
+    - A list of field name strings (possibly empty).
+    """
+    try:
+        return [f['name'] for f in note.note_type()['flds']]
+    except (TypeError, KeyError, AttributeError):
+        return []
+
+
+def find_dst_field_indices(field_names, jp_field, tr_field):
+    """
+    Resolve the configured Japanese/Translation destination fields to indices.
+
+    Args:
+    - field_names (list): Field names of the current note type.
+    - jp_field (str): Configured Japanese example destination field name.
+    - tr_field (str): Configured translated example destination field name.
+
+    Returns:
+    - A (japanese_index, translation_index) tuple when both fields are present,
+      otherwise None.
+    """
+    if jp_field in field_names and tr_field in field_names:
+        return field_names.index(jp_field), field_names.index(tr_field)
+    return None
+
+
+def missing_dst_fields_message(field_names, jp_field, tr_field):
+    """
+    Build the localized "no_valid_dst_fields" message for whichever required
+    destination field is missing from the note type.
+
+    Reuses the exact placeholder contract ({missing} / {available}) already
+    present in every locale file, so no translations need updating.
+    """
+    missing = []
+    if jp_field not in field_names:
+        missing.append(f"'{jp_field}' (Japanese)")
+    if tr_field not in field_names:
+        missing.append(f"'{tr_field}' (Translation)")
+    return _("no_valid_dst_fields").format(
+        missing=", ".join(missing),
+        available=", ".join(field_names),
+    )
+
+
 def add_example_manually_dialog(editor):
     """
     Dialog for adding an example of sentence based on japanese word present in the selected field.
@@ -255,10 +310,20 @@ def add_example_manually_dialog(editor):
         showInfo(_("no_japanese_sentence_found").format(word=japanese_word))
         return
 
-    # Check for deck preferences
-    deck_id = get_current_deck_id(editor)
     addon_name = __name__.split('.')[0]
     config = mw.addonManager.getConfig(addon_name) or {}
+
+    # Fail fast when the configured destination fields are absent from this
+    # note type: no point asking for a language or contacting Tatoeba.
+    field_names = get_note_field_names(editor.note)
+    jp_f = config.get("japaneseDstField", "ExampleJapanese")
+    tr_f = config.get("translationDstField", "ExampleTranslated")
+    if find_dst_field_indices(field_names, jp_f, tr_f) is None:
+        showInfo(missing_dst_fields_message(field_names, jp_f, tr_f))
+        return
+
+    # Check for deck preferences
+    deck_id = get_current_deck_id(editor)
     deck_prefs = config.get('deck_preferences', {})
 
     target_lang = None
@@ -306,13 +371,9 @@ def add_example_manually_dialog(editor):
 
     # Audio pre-check is only worthwhile when audio will actually be written:
     # the audio destination field must be configured and present on the note.
-    try:
-        _note_field_names = [f['name'] for f in editor.note.note_type()['flds']]
-    except (TypeError, KeyError, AttributeError):
-        _note_field_names = []
-    _audio_dst = config.get("audioDstField", "ExampleAudio")
+    audio_dst = config.get("audioDstField", "ExampleAudio")
     audio_active = (
-        bool(_audio_dst) and _audio_dst in _note_field_names and resolve_audio is not None
+        bool(audio_dst) and audio_dst in field_names and resolve_audio is not None
     )
 
     def audio_cache_for(col, sentences):
@@ -417,9 +478,7 @@ def add_example_manually_dialog(editor):
                     note = editor.note
 
                     # Get the field names
-                    note_type = note.note_type()
-                    fields = note_type['flds']
-                    field_names = [field['name'] for field in fields]
+                    field_names = get_note_field_names(note)
 
                     # Use dynamic config for field names
                     current_config = mw.addonManager.getConfig(addon_name) or {}
@@ -427,24 +486,12 @@ def add_example_manually_dialog(editor):
                     jp_f = current_config.get("japaneseDstField", "ExampleJapanese")
                     tr_f = current_config.get("translationDstField", "ExampleTranslated")
 
-                    valid_field_pairs = []
-                    if jp_f in field_names and tr_f in field_names:
-                        valid_field_pairs.append((field_names.index(jp_f), field_names.index(tr_f)))
-
-                    if not valid_field_pairs:
+                    # Safety net: the early guard already checked this at click
+                    # time, but re-check in case the note type changed meanwhile.
+                    indices = find_dst_field_indices(field_names, jp_f, tr_f)
+                    if indices is None:
                         discard_cached_audio(audio_cache)
-                        missing = []
-                        if jp_f not in field_names:
-                            missing.append(f"'{jp_f}' (Japanese)")
-                        if tr_f not in field_names:
-                            missing.append(f"'{tr_f}' (Translation)")
-                        available = ", ".join(field_names)
-                        showInfo(
-                            _("no_valid_dst_fields").format(
-                                missing=", ".join(missing),
-                                available=available
-                            )
-                        )
+                        showInfo(missing_dst_fields_message(field_names, jp_f, tr_f))
                         return
 
                     # User chooses which example to add
@@ -463,7 +510,7 @@ def add_example_manually_dialog(editor):
                     jp_sentence = chosen_example['jp_sentence']
                     tr_sentence = chosen_example['tr_sentence']
 
-                    jp_field_index, en_field_index = valid_field_pairs[0]
+                    jp_field_index, en_field_index = indices
 
                     # Audio write path: the pre-check already fetched the chosen
                     # sentence's audio (or found it in col.media), so registering
