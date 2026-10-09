@@ -22,27 +22,14 @@ except ImportError:
 
 try:
     from . import audio_fetcher
-    from .audio_fetcher import (
-        AudioDownloadError,
-        FETCH_OK,
-        FETCH_NO_RECORDING,
-        FETCH_RESTRICTED,
-    )
+    from .audio_fetcher import AudioDownloadError
 except ImportError:
     try:
         import audio_fetcher
-        from audio_fetcher import (
-            AudioDownloadError,
-            FETCH_OK,
-            FETCH_NO_RECORDING,
-            FETCH_RESTRICTED,
-        )
+        from audio_fetcher import AudioDownloadError
     except ImportError:
         audio_fetcher = None  # type: ignore
         AudioDownloadError = Exception  # type: ignore
-        FETCH_OK = "ok"  # type: ignore
-        FETCH_NO_RECORDING = "no_recording"  # type: ignore
-        FETCH_RESTRICTED = "restricted"  # type: ignore
 
 try:
     from anki.collection import SearchNode
@@ -149,78 +136,14 @@ class BatchResult:
 
 
 # Per-item outcome statuses produced by download_pending_audio() and
-# consumed by register_pending_audio().
-AUDIO_FETCHED = "fetched"        # payload: temp file path
-AUDIO_EXISTS = "exists"          # payload: filename already in col.media
+# consumed by register_audio_media().
+# AUDIO_RESOLVED: audio is available. payload is an audio_fetcher.ResolvedAudio
+#   carrying the chosen sentence + source; register_audio_media() registers a
+#   temp file or passes a media filename through, and apply_audio_fields() swaps
+#   the pair's text when the resolution came from a 403 re-selection.
+AUDIO_RESOLVED = "resolved"
 AUDIO_NO_RECORDING = "no_audio"  # payload: None (Tatoeba 404, or 403 with no usable alternative)
 AUDIO_FETCH_ERROR = "error"      # payload: None
-# 403 restricted, but a different candidate's audio downloaded instead. payload:
-# (fname_or_tmp_path, already_in_media, new_jpn_id, new_jpn_text, new_trans_text).
-# register_audio_media() consumes it and apply_audio_fields() swaps the pair's text.
-AUDIO_RESELECTED = "reselected"
-
-# How many alternative candidates one 403-restricted pair may try before giving
-# up and keeping its original sentence (with no audio). Bounds worst-case
-# latency per pair while still surviving the common case where a single
-# restricted author recorded every sentence for the word.
-MAX_RESELECT_ATTEMPTS = 3
-
-
-def _try_reselect_audio(note_id, alt_candidates, note_bad_ids, note_used_ids, col):
-    """Try alternative sentences' audio after a 403 on the primary sentence.
-
-    BACKGROUND-SAFE: reads col.media and does network + temp-file I/O only;
-    no counter mutation (the caller accounts for the outcome).
-
-    Walks ``alt_candidates`` in order, skipping any jpn_id already used for this
-    note (a successful swap by another pair) or already known to be 403-restricted
-    on this note, and stops at the first candidate whose audio is available. At
-    most MAX_RESELECT_ATTEMPTS candidates are actually attempted, so a word whose
-    recordings are all restricted cannot stall the run.
-
-    Args:
-    - note_id (int): The note being processed; keys the per-note skip sets.
-    - alt_candidates (list[tuple]): ``(jpn_id, jpn_text, trans_text)`` fallbacks
-      built by run_batch().
-    - note_bad_ids (dict[int, set]): jpn_ids already known restricted per note.
-    - note_used_ids (dict[int, set]): jpn_ids already swapped per note.
-    - col: The Anki collection object (for col.media.have).
-
-    Returns:
-    - ``None`` when no candidate could be downloaded.
-    - Otherwise ``(fname_or_tmp_path, already_in_media, new_jpn_id, new_jpn_text,
-      new_trans_text)`` describing the swap. ``fname_or_tmp_path`` is an existing
-      media filename when ``already_in_media`` is True, else a temp file path the
-      caller passes on to register_audio_file().
-
-    Raises:
-        AudioDownloadError: Only from a candidate's network fetch; the caller's
-            containing try/except reports it like any other fetch failure.
-    """
-    bad = note_bad_ids.setdefault(note_id, set())
-    used = note_used_ids.setdefault(note_id, set())
-    attempts = 0
-    for cand_jpn_id, cand_jpn_text, cand_trans_text in alt_candidates:
-        if cand_jpn_id in bad or cand_jpn_id in used:
-            continue
-        if attempts >= MAX_RESELECT_ATTEMPTS:
-            break
-        attempts += 1
-
-        expected_fname = f"{cand_jpn_id}.mp3"
-        if col.media.have(expected_fname):
-            used.add(cand_jpn_id)
-            return (expected_fname, True, cand_jpn_id, cand_jpn_text, cand_trans_text)
-
-        status, tmp_path = audio_fetcher.fetch_audio_to_temp_ex(cand_jpn_id)
-        if status == FETCH_OK:
-            used.add(cand_jpn_id)
-            return (tmp_path, False, cand_jpn_id, cand_jpn_text, cand_trans_text)
-        if status == FETCH_RESTRICTED:
-            # Remember it so another pair on this note does not retry it.
-            bad.add(cand_jpn_id)
-        # FETCH_NO_RECORDING: try the next candidate.
-    return None
 
 
 def download_pending_audio(result: BatchResult, col, progress_cb=None) -> list:
@@ -234,16 +157,12 @@ def download_pending_audio(result: BatchResult, col, progress_cb=None) -> list:
     (jpn_id, note_id, jpn_field, trans_field, audio_field, alt_candidates) in
     result.pending_audio, produces one
     (note_id, jpn_field, trans_field, audio_field, jpn_id, status, payload) tuple:
-    - AUDIO_EXISTS: file already registered in col.media; payload is the filename.
-    - AUDIO_FETCHED: downloaded; payload is the temp file path (owned by the
-      caller until register_pending_audio consumes or cleans it).
+    - AUDIO_RESOLVED: audio is available (already in col.media, or downloaded).
+      payload is an audio_fetcher.ResolvedAudio naming the chosen sentence and
+      the source; a 403 on the primary is resolved by re-selecting from
+      alt_candidates, and the ResolvedAudio then carries the replacement text.
     - AUDIO_NO_RECORDING: Tatoeba returned 404, or returned 403 and no alternative
       candidate's audio could be obtained; payload is None.
-    - AUDIO_RESELECTED: the primary sentence's audio was 403-restricted and a
-      different candidate downloaded successfully. payload is
-      (fname_or_tmp_path, already_in_media, new_jpn_id, new_jpn_text,
-      new_trans_text). register_audio_media()/apply_audio_fields() swap the pair's
-      text and audio to the new sentence.
     - AUDIO_FETCH_ERROR: download failed, audio field missing from the note
       type, or the note could not be loaded; payload is None. One bad item
       never aborts the remaining downloads.
@@ -266,7 +185,7 @@ def download_pending_audio(result: BatchResult, col, progress_cb=None) -> list:
     # Per-note bookkeeping for 403 re-selection, shared across the pairs of one
     # note so two restricted pairs never swap to the same sentence and no pair
     # retries a recording already known to be restricted.
-    note_bad_ids: dict[int, set] = {}
+    note_restricted_ids: dict[int, set] = {}
     note_used_ids: dict[int, set] = {}
 
     total = len(result.pending_audio)
@@ -290,32 +209,17 @@ def download_pending_audio(result: BatchResult, col, progress_cb=None) -> list:
                               jpn_id, AUDIO_FETCH_ERROR, None))
                 continue
 
-            expected_fname = f"{jpn_id}.mp3"
-            if col.media.have(expected_fname):
-                items.append((note_id, jpn_field, trans_field, audio_field,
-                              jpn_id, AUDIO_EXISTS, expected_fname))
-                continue
-
-            status, tmp_path = audio_fetcher.fetch_audio_to_temp_ex(jpn_id)
-            if status == FETCH_RESTRICTED:
-                # The sentence's text is fine but its recording may not be reused
-                # outside Tatoeba. Try a different recording for the same word;
-                # only swap the pair if one actually downloads.
-                note_bad_ids.setdefault(note_id, set()).add(jpn_id)
-                swapped = _try_reselect_audio(
-                    note_id, alt_candidates, note_bad_ids, note_used_ids, col)
-                if swapped is not None:
-                    items.append((note_id, jpn_field, trans_field, audio_field,
-                                  jpn_id, AUDIO_RESELECTED, swapped))
-                else:
-                    items.append((note_id, jpn_field, trans_field, audio_field,
-                                  jpn_id, AUDIO_NO_RECORDING, None))
-            elif status == FETCH_NO_RECORDING:
+            resolved = audio_fetcher.resolve_audio(
+                jpn_id, alt_candidates, col,
+                restricted_ids=note_restricted_ids.setdefault(note_id, set()),
+                used_ids=note_used_ids.setdefault(note_id, set()),
+            )
+            if resolved is None:
                 items.append((note_id, jpn_field, trans_field, audio_field,
                               jpn_id, AUDIO_NO_RECORDING, None))
-            else:  # FETCH_OK
+            else:
                 items.append((note_id, jpn_field, trans_field, audio_field,
-                              jpn_id, AUDIO_FETCHED, tmp_path))
+                              jpn_id, AUDIO_RESOLVED, resolved))
         except AudioDownloadError as exc:
             logger.error("Audio download error for jpn_id %s: %s", jpn_id, exc)
             result.audio_error_details.append(
@@ -347,12 +251,11 @@ def register_audio_media(items: list, result: BatchResult, col) -> list:
     (those run inside a CollectionOp so they land in a named undo entry).
 
     Consumes the outcome tuples produced by download_pending_audio():
-    - AUDIO_FETCHED: registers the temp file via register_audio_file()
-      (which owns temp cleanup even on failure) and passes it through.
-    - AUDIO_EXISTS: passes the existing filename through unchanged.
-    - AUDIO_RESELECTED: registers the replacement temp file (or passes its
-      existing filename through) and carries the new sentence text along so
-      apply_audio_fields() can swap the pair. The file is stored under the new
+    - AUDIO_RESOLVED: registers the temp file via register_audio_file() (which
+      owns temp cleanup even on failure) when the source is "temp", or passes
+      the existing filename through when it is "media". The sentence text is
+      carried along so apply_audio_fields() can swap the pair when the audio
+      came from a 403 re-selection. The file is stored under the resolved
       sentence's own jpn_id.
     - AUDIO_NO_RECORDING: increments result.audio_skipped.
     - AUDIO_FETCH_ERROR: increments result.audio_errors.
@@ -371,22 +274,16 @@ def register_audio_media(items: list, result: BatchResult, col) -> list:
                 result.audio_errors += 1
             elif status == AUDIO_NO_RECORDING:
                 result.audio_skipped += 1
-            elif status == AUDIO_EXISTS:
-                registered.append(
-                    (note_id, audio_field, jpn_id, payload, None, None, None, None))
-            elif status == AUDIO_RESELECTED:
-                fname_or_tmp, already_in_media, new_jpn_id, new_text, new_trans = payload
-                if already_in_media:
-                    fname = fname_or_tmp
+            else:  # AUDIO_RESOLVED
+                resolved = payload
+                if resolved.source == "media":
+                    fname = resolved.payload
                 else:
-                    fname = audio_fetcher.register_audio_file(fname_or_tmp, col)
+                    fname = audio_fetcher.register_audio_file(resolved.payload, col)
                 registered.append(
-                    (note_id, audio_field, new_jpn_id, fname,
-                     jpn_field, trans_field, new_text, new_trans))
-            else:  # AUDIO_FETCHED
-                fname = audio_fetcher.register_audio_file(payload, col)
-                registered.append(
-                    (note_id, audio_field, jpn_id, fname, None, None, None, None))
+                    (note_id, audio_field, resolved.jpn_id, fname,
+                     jpn_field, trans_field,
+                     resolved.jpn_text, resolved.trans_text))
         except Exception as exc:
             result.audio_errors += 1
             result.audio_error_details.append(
