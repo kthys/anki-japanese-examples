@@ -3,8 +3,6 @@
 # Note: For CI/CD, use requirements-dev.lock which pins exact versions
 # to prevent supply-chain attacks. This file specifies the desired
 # version ranges for local development.
-#
-# See SECURITY-DEPENDENCIES.md for more information.
 
 responses>=0.25,<1
 requests>=2.34.2,<3
