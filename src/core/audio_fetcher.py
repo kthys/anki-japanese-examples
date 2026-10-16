@@ -15,6 +15,7 @@ THREADING MODEL:
 
 import logging
 import os
+import re
 import tempfile
 from typing import NamedTuple, Optional
 
@@ -29,6 +30,14 @@ logger = logging.getLogger(__name__)
 
 AUDIO_URL_TEMPLATE = "https://audio.tatoeba.org/sentences/jpn/{jpn_id}.mp3"
 REQUEST_TIMEOUT = 10  # seconds
+
+# Untrusted Tatoeba sentence ids must be plain ASCII digits. Ids arrive from
+# downloaded TSV imports and the Tatoeba JSON API, and flow into both the audio
+# URL and the temp file name "{jpn_id}.mp3"; a digits-only allowlist keeps
+# traversal sequences, path separators, absolute paths, Windows drive letters,
+# and URL metacharacters out of both sinks (CWE-22). A regex rather than
+# str.isdigit() so fullwidth digits ('１２３') are rejected too.
+_SENTENCE_ID_RE = re.compile(r"[0-9]{1,16}")
 
 # Status values returned by fetch_audio_to_temp(). resolve_audio() consumes them
 # internally to tell a permanent 403 (author restricts reuse — try another
@@ -53,6 +62,30 @@ class AudioDownloadError(Exception):
     reuse outside of Tatoeba) do NOT raise this — they are reported as fetch
     statuses instead.
     """
+
+
+def _valid_sentence_id(jpn_id) -> bool:
+    """Return True only for a plain ASCII digit string (a real Tatoeba id).
+
+    False for anything else: traversal sequences, path separators, absolute
+    paths, Windows drive letters, URL metacharacters, fullwidth digits,
+    non-strings, and ids past the 16-digit cap.
+    """
+    return (isinstance(jpn_id, str)
+            and _SENTENCE_ID_RE.fullmatch(jpn_id) is not None)
+
+
+def _assert_valid_sentence_id(jpn_id) -> None:
+    """Raise AudioDownloadError unless jpn_id is a plain ASCII digit string.
+
+    Every entry point that turns a sentence id into a request URL, a
+    col.media lookup, or a file path validates through here, so malformed
+    input fails loudly through the module's error channel instead of ever
+    reaching a sink.
+    """
+    if not _valid_sentence_id(jpn_id):
+        raise AudioDownloadError(
+            f"Invalid Tatoeba sentence id {jpn_id!r}: not a numeric id")
 
 
 class ResolvedAudio(NamedTuple):
@@ -90,6 +123,20 @@ def cleanup_temp_audio(tmp_path: str) -> None:
         logger.warning("Could not delete temp dir %s", tmp_dir)
 
 
+def _remove_empty_temp_dir(tmp_dir: str) -> None:
+    """Remove a just-created, still-empty temp audio directory.
+
+    Used when validation fails between mkdtemp() and the file write, so a
+    rejected sentence id never leaks an empty directory. The audio file was
+    never written, so only the directory needs removing; a failure here
+    (e.g. a dir that is somehow not empty) only produces a log warning.
+    """
+    try:
+        os.rmdir(tmp_dir)
+    except OSError:
+        logger.warning("Could not remove empty temp dir %s", tmp_dir)
+
+
 def fetch_audio_to_temp(jpn_id: str) -> "tuple[str, str | None]":
     """Download the Tatoeba audio for jpn_id, reporting *why* it did not arrive.
 
@@ -101,8 +148,9 @@ def fetch_audio_to_temp(jpn_id: str) -> "tuple[str, str | None]":
     outcome matters (e.g. probing whether a specific sentence is 403-restricted).
 
     Args:
-        jpn_id: The Tatoeba sentence ID (e.g. "12345"). Used to construct the
-                audio URL and the temp filename "{jpn_id}.mp3".
+        jpn_id: The Tatoeba sentence ID (e.g. "12345"). Must be a plain ASCII
+                digit string — untrusted input, validated here before it can
+                reach the audio URL or the temp filename "{jpn_id}.mp3".
 
     Returns:
         A ``(status, tmp_path)`` tuple where:
@@ -119,8 +167,11 @@ def fetch_audio_to_temp(jpn_id: str) -> "tuple[str, str | None]":
 
     Raises:
         AudioDownloadError: For all other network failures (timeout, connection
-            refused, DNS failure, non-200/non-404/non-403 HTTP status codes).
+            refused, DNS failure, non-200/non-404/non-403 HTTP status codes),
+            and for a malformed sentence id (anything but plain ASCII digits —
+            rejected before the request URL or any temp file is created).
     """
+    _assert_valid_sentence_id(jpn_id)
     url = AUDIO_URL_TEMPLATE.format(jpn_id=jpn_id)
 
     # Attempt the HTTP download. Network-level errors (DNS, timeout, connection
@@ -159,10 +210,25 @@ def fetch_audio_to_temp(jpn_id: str) -> "tuple[str, str | None]":
 
     tmp_dir = tempfile.mkdtemp()
     tmp_path = os.path.join(tmp_dir, f"{jpn_id}.mp3")
-    base_real = os.path.realpath(tmp_dir)
-    target_real = os.path.realpath(tmp_path)
-    if os.path.commonpath([base_real, target_real]) != base_real:
-        raise Exception("Invalid file path")
+    # Defense in depth (CWE-22): the digits-only validation above keeps
+    # traversal sequences out of the file name, and this canonical-path check
+    # proves the resolved target stays inside the fresh temp dir before any
+    # bytes are written. It cannot trip for a validated id — it guards the
+    # write against regressions, and fails closed: the module's own error
+    # type, no unhandled ValueError from commonpath(), and no empty temp dir
+    # leaked behind.
+    try:
+        base_real = os.path.realpath(tmp_dir)
+        target_real = os.path.realpath(tmp_path)
+        inside = os.path.commonpath([base_real, target_real]) == base_real
+    except (ValueError, OSError) as exc:
+        _remove_empty_temp_dir(tmp_dir)
+        raise AudioDownloadError(
+            f"Could not verify temp path for sentence {jpn_id}: {exc}") from exc
+    if not inside:
+        _remove_empty_temp_dir(tmp_dir)
+        raise AudioDownloadError(
+            f"Temp file path for sentence {jpn_id} escapes the temp dir")
     try:
         with open(target_real, "wb") as tmp:
             tmp.write(response.content)
@@ -177,10 +243,15 @@ def _probe_candidate(jpn_id: str, col) -> "tuple[str, str | None, str | None]":
 
     BACKGROUND-SAFE: reads col.media and does network + temp-file I/O only.
 
-    Checks col.media first (a previously registered file needs no download),
-    then fetch_audio_to_temp(). ``source``/``payload`` are only meaningful when
-    status is FETCH_OK.
+    Validates the id first (untrusted input — see
+    _assert_valid_sentence_id), then checks col.media (a previously
+    registered file needs no download), then fetch_audio_to_temp().
+    ``source``/``payload`` are only meaningful when status is FETCH_OK.
+
+    Raises:
+        AudioDownloadError: If jpn_id is malformed (not plain ASCII digits).
     """
+    _assert_valid_sentence_id(jpn_id)
     expected_fname = f"{jpn_id}.mp3"
     if col.media.have(expected_fname):
         return FETCH_OK, "media", expected_fname
@@ -220,7 +291,10 @@ def resolve_audio(primary_jpn_id: str, candidates: list, col,
       ``jpn_text``/``trans_text`` are None when the primary succeeded.
 
     Raises:
-        AudioDownloadError: On a network failure for any attempted sentence.
+        AudioDownloadError: On a network failure for any attempted sentence,
+            or when a sentence id (primary or candidate) is malformed —
+            untrusted ids never reach the request URL, col.media, or a temp
+            file path.
     """
     if restricted_ids is None:
         restricted_ids = set()
@@ -304,7 +378,8 @@ def download_audio(jpn_id: str, col) -> "str | None":
 
     Raises:
         AudioDownloadError: For all other network failures (timeout, connection
-            refused, DNS failure, non-200/non-404/non-403 HTTP status codes).
+            refused, DNS failure, non-200/non-404/non-403 HTTP status codes),
+            and for a malformed (non-numeric) jpn_id.
     """
     resolved = resolve_audio(jpn_id, [], col)
     if resolved is None:
