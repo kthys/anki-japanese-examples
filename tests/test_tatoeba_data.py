@@ -1114,6 +1114,35 @@ class TestTatoebaData(unittest.TestCase):
                              {"fra": {"downloaded_at": "old", "count": 2}})
         self.assertFalse(os.path.exists(tatoeba_data.METADATA_FILE + ".tmp"))
 
+    # ── atomic db replace ──
+
+    def test_atomic_replace_db_retries_then_reraises(self):
+        """A persistent PermissionError is retried three times, then re-raised."""
+        src = os.path.join(self.temp_dir, "new.db")
+        dst = os.path.join(self.temp_dir, "index.db")
+
+        with patch("src.core.tatoeba_data.os.replace",
+                   side_effect=PermissionError("locked")) as mg, \
+             patch("src.core.tatoeba_data.time.sleep") as sleep:
+            with self.assertRaises(PermissionError):
+                tatoeba_data._atomic_replace_db(src, dst)
+
+        self.assertEqual(mg.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_atomic_replace_db_succeeds_after_transient_error(self):
+        """A transient PermissionError is waited off and the next attempt wins."""
+        src = os.path.join(self.temp_dir, "new.db")
+        dst = os.path.join(self.temp_dir, "index.db")
+
+        with patch("src.core.tatoeba_data.os.replace",
+                   side_effect=[PermissionError("locked"), None]) as mg, \
+             patch("src.core.tatoeba_data.time.sleep") as sleep:
+            tatoeba_data._atomic_replace_db(src, dst)
+
+        self.assertEqual(mg.call_count, 2)
+        self.assertEqual(sleep.call_count, 1)
+
     def test_read_metadata_handles_missing_and_corrupt(self):
         """_read_metadata returns {} for a missing or corrupt file."""
         self.assertEqual(tatoeba_data._read_metadata(), {})
