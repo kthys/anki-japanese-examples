@@ -118,6 +118,114 @@ class TestI18n(unittest.TestCase):
         translator_fr = i18n.SimpleTranslator('fr_FR')
         self.assertEqual(translator_fr.gettext('searching'), 'Recherche...')
 
+class TestUntrustedLangCode(unittest.TestCase):
+    """Malicious/odd lang codes must never open files outside locale/ (CWE-22)."""
+
+    BAD_LANG_CODES = [
+        '../../..',
+        '../../../etc/creds',
+        '/etc/passwd',
+        r'..\..\win',
+        '..',
+        '',
+        'zh/../fr',
+        'en; rm -rf',
+        'en.json',
+    ]
+
+    def setUp(self):
+        # same patcher pattern as TestI18n
+        self.mock_mw = MagicMock()
+        self.mock_aqt = MagicMock()
+        self.mock_aqt.mw = self.mock_mw
+        self.patcher = patch.dict(sys.modules, {
+            'aqt': self.mock_aqt,
+            'aqt.mw': self.mock_mw
+        })
+        self.patcher.start()
+        if 'src.utils.i18n' in sys.modules:
+            del sys.modules['src.utils.i18n']
+
+    def tearDown(self):
+        self.patcher.stop()
+        if 'src.utils.i18n' in sys.modules:
+            del sys.modules['src.utils.i18n']
+
+    def test_base_lang_valid_codes(self):
+        """_base_lang reduces valid codes to their base language."""
+        import src.utils.i18n as i18n_mod
+        cases = {
+            'en': 'en',
+            'en_US': 'en',
+            'fr_FR': 'fr',
+            'zh_CN': 'zh',
+            'zh_TW': 'zh',
+            'pt-BR': 'pt',
+            'EN_us': 'en',
+            '  ko  ': 'ko',
+        }
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(i18n_mod._base_lang(raw), expected)
+
+    def test_base_lang_rejects_malformed(self):
+        """_base_lang returns None for traversal payloads and non-strings."""
+        import src.utils.i18n as i18n_mod
+        malformed = self.BAD_LANG_CODES + [None, 123, b'en', '../locale/en', 'en/../..']
+        for raw in malformed:
+            with self.subTest(raw=repr(raw)):
+                self.assertIsNone(i18n_mod._base_lang(raw))
+
+    def _translator_with_open_recorder(self, lang, opened_paths):
+        """Build a SimpleTranslator while recording every open() path."""
+        import builtins
+        import src.utils.i18n as i18n_mod
+        real_open = builtins.open
+
+        def recording_open(file, *args, **kwargs):
+            opened_paths.append(os.path.abspath(file))
+            return real_open(file, *args, **kwargs)
+
+        with patch('builtins.open', side_effect=recording_open):
+            return i18n_mod.SimpleTranslator(lang)
+
+    def test_traversal_lang_codes_stay_inside_locale_dir(self):
+        """Malicious lang codes fall back to English-only and open only locale/en.json."""
+        locale_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'locale')
+        for lang in self.BAD_LANG_CODES:
+            with self.subTest(lang=lang):
+                opened_paths = []
+                translator = self._translator_with_open_recorder(lang, opened_paths)
+                # English base still loads (no crash, English-only fallback)
+                self.assertEqual(translator.gettext('searching'), 'Searching...')
+                # No overlay file was opened beyond the English base
+                self.assertEqual(opened_paths, [os.path.join(locale_dir, 'en.json')])
+                # Every opened path stays inside locale/
+                for p in opened_paths:
+                    self.assertEqual(
+                        os.path.commonpath([p, locale_dir]), locale_dir,
+                        f"opened path escapes locale dir: {p}",
+                    )
+
+    def test_valid_lang_codes_open_only_locale_files(self):
+        """Valid codes open exactly the English base plus their locale overlay."""
+        locale_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'locale')
+        cases = {
+            'fr': 'fr.json',
+            'fr_FR': 'fr.json',
+            'zh_CN': 'zh.json',
+            'zh_TW': 'zh.json',
+            'es': 'es.json',
+        }
+        for lang, overlay in cases.items():
+            with self.subTest(lang=lang):
+                opened_paths = []
+                translator = self._translator_with_open_recorder(lang, opened_paths)
+                expected = [os.path.join(locale_dir, 'en.json'), os.path.join(locale_dir, overlay)]
+                self.assertEqual(opened_paths, expected)
+                self.assertNotEqual(translator.gettext('searching'), 'searching')
+
+
 class TestLocaleAudioKeys(unittest.TestCase):
     """Verify that all new audio-feature locale keys are present in both en.json and fr.json."""
 
