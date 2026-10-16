@@ -550,17 +550,14 @@ def _atomic_replace_db(src: str, dst: str) -> None:
     ``search_word`` connections are short-lived and the batch dialog is modal,
     so a brief wait usually lets the handle close.
     """
-    last_exc: Optional[Exception] = None
     for attempt in range(3):
         try:
             os.replace(src, dst)
             return
-        except PermissionError as exc:
-            last_exc = exc
-            if attempt < 2:
-                time.sleep(0.5)
-    assert last_exc is not None
-    raise last_exc
+        except PermissionError:
+            if attempt == 2:
+                raise
+            time.sleep(0.5)
 
 
 def _sweep_stale_workdirs(
