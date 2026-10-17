@@ -39,6 +39,22 @@ class FakeCol:
         self.media = FakeMedia()
 
 
+class FakeLegacyMedia:
+    """Fake of col.media without trash_files() — models older Anki, where
+    unregister_audio_files() must fall back to deleting from media.dir()."""
+
+    def __init__(self, media_dir: str):
+        self._dir = media_dir
+
+    def dir(self) -> str:
+        return self._dir
+
+
+class FakeLegacyCol:
+    def __init__(self, media_dir: str):
+        self.media = FakeLegacyMedia(media_dir)
+
+
 class TestDownloadAudio(unittest.TestCase):
 
     @responses_lib.activate
@@ -405,6 +421,73 @@ class TestUntrustedSentenceId(unittest.TestCase):
         self.assertEqual(
             os.path.commonpath([parent_real, temp_root_real]), temp_root_real)
         audio_fetcher.cleanup_temp_audio(path)
+
+
+class TestUnregisterAudioFiles(unittest.TestCase):
+    """Tests for unregister_audio_files() — the compensating-cleanup primitive."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def _write(self, fname: str) -> str:
+        path = os.path.join(self.tmp_dir, fname)
+        with open(path, "wb") as fh:
+            fh.write(b"\xff\xfb")
+        return path
+
+    def test_empty_input_is_noop(self):
+        """No filenames means no media interaction at all."""
+        col = MagicMock()
+        self.assertEqual(audio_fetcher.unregister_audio_files([], col), [])
+        col.media.trash_files.assert_not_called()
+
+    def test_trash_files_is_preferred(self):
+        """When col.media.trash_files() exists it is used (recoverable), and
+        the input is echoed as removed."""
+        col = MagicMock()
+        removed = audio_fetcher.unregister_audio_files(
+            ["11111.mp3", "22222.mp3"], col)
+
+        self.assertEqual(removed, ["11111.mp3", "22222.mp3"])
+        col.media.trash_files.assert_called_once_with(["11111.mp3", "22222.mp3"])
+
+    def test_direct_delete_fallback_without_trash_files(self):
+        """Older Anki lacks trash_files() — files are deleted from
+        media.dir(); a missing file is skipped without raising."""
+        self._write("11111.mp3")
+        self._write("22222.mp3")
+        col = FakeLegacyCol(self.tmp_dir)
+
+        removed = audio_fetcher.unregister_audio_files(
+            ["11111.mp3", "22222.mp3", "missing.mp3"], col)
+
+        self.assertEqual(removed, ["11111.mp3", "22222.mp3"])
+        self.assertFalse(os.path.exists(os.path.join(self.tmp_dir, "11111.mp3")))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp_dir, "22222.mp3")))
+
+    def test_trash_failure_falls_back_to_direct_delete(self):
+        """A trash_files() exception must not abort cleanup — direct
+        deletion follows for whatever is still on disk."""
+        self._write("11111.mp3")
+        col = MagicMock()
+        col.media.dir.return_value = self.tmp_dir
+        col.media.trash_files.side_effect = RuntimeError("trash backend down")
+
+        removed = audio_fetcher.unregister_audio_files(["11111.mp3"], col)
+
+        self.assertEqual(removed, ["11111.mp3"])
+        self.assertFalse(os.path.exists(os.path.join(self.tmp_dir, "11111.mp3")))
+
+    def test_removal_failures_never_raise(self):
+        """A file that cannot be deleted is logged and skipped — the function
+        must never raise, so failure paths can always call it."""
+        col = FakeLegacyCol(self.tmp_dir)  # directory exists, file does not
+        removed = audio_fetcher.unregister_audio_files(["missing.mp3"], col)
+        self.assertEqual(removed, [])
 
 
 if __name__ == "__main__":

@@ -789,6 +789,10 @@ class BatchDialog(QDialog):
                 # [sound:] tags land in their own named undo entry.
                 registered = batch_engine.register_audio_media(items, result, mw.col)
                 if not registered:
+                    # Nothing was registered, so there is no media to clean
+                    # up — kept so every exit path after the register phase
+                    # drains result.newly_added_media.
+                    batch_engine.remove_orphaned_media(result, mw.col)
                     result.pending_audio.clear()
                     safe_execute(show_report)
                     return
@@ -803,6 +807,10 @@ class BatchDialog(QDialog):
 
                 def on_apply_success(_apply_changes):
                     _active_ops.discard(apply_op)
+                    # Main thread: remove files whose note updates failed.
+                    # apply_audio_fields() already untracked the applied
+                    # ones, so this drains exactly the orphans.
+                    batch_engine.remove_orphaned_media(result, mw.col)
                     safe_execute(show_report)
 
                 def on_apply_failure(exc):
@@ -813,6 +821,13 @@ class BatchDialog(QDialog):
                         f"Applying audio fields failed entirely "
                         f"({len(registered)} note(s)): {exc}"
                     )
+                    # Compensating cleanup: the apply op failed (possibly
+                    # before or part-way through its loop), so every file
+                    # the register phase added is unreferenced. Media is
+                    # outside undo — without this, the files would be
+                    # orphaned in the profile forever. Runs here on the
+                    # main thread, never inside the background op.
+                    batch_engine.remove_orphaned_media(result, mw.col)
                     result.pending_audio.clear()
                     safe_execute(show_report)
 

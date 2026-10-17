@@ -9,6 +9,9 @@ THREADING MODEL:
     - register_audio_file(): calls col.media.add_file(), which requires
       main-thread execution (Anki architectural constraint). MUST be called
       from the main thread (e.g. a QueryOp success callback).
+    - unregister_audio_files(): removes files from col.media again (trash
+      when available, direct deletion otherwise). Same main-thread
+      constraint; never raises, so failure handlers can call it safely.
     download_audio() composes both phases synchronously and therefore MUST be
     called from the main thread. Callers are responsible for these preconditions.
 """
@@ -354,6 +357,69 @@ def register_audio_file(tmp_path: str, col) -> str:
     finally:
         cleanup_temp_audio(tmp_path)
     return stored_fname
+
+
+def unregister_audio_files(fnames: list, col) -> "list[str]":
+    """Remove previously registered audio files from col.media.
+
+    PRECONDITION: Must be called from the main thread, like
+    register_audio_file() — it mutates the media folder.
+
+    Compensating cleanup for the audio pipeline: media files live outside
+    Anki's undo system, so when a note update fails after register_audio_file()
+    succeeded, the only way to avoid orphaned media accumulating in the
+    user's profile is to remove the file again. Callers must pass ONLY
+    filenames they know the current batch itself added — never files that
+    may predate the batch (see batch_engine.register_audio_media() for how
+    those are told apart).
+
+    Prefers col.media.trash_files() (moves files to Anki's media trash, from
+    which Check Media can restore or permanently delete them — recoverable
+    if a caller is ever wrong). Falls back to deleting each file directly
+    when trash_files() is unavailable (older Anki). Missing files and
+    per-file errors are logged and skipped; this function never raises, so
+    it can run from any failure path without masking the original error.
+
+    Args:
+        fnames: Filenames in col.media to remove. Empty input is a no-op.
+        col:    The Anki collection object (mw.col).
+
+    Returns:
+        The filenames actually removed. trash_files() gives no per-file
+        feedback, so on a successful trash call the input is echoed; with
+        the direct-delete fallback only the files that were really deleted
+        are listed.
+    """
+    if not fnames:
+        return []
+
+    trash_files = getattr(col.media, "trash_files", None)
+    if callable(trash_files):
+        try:
+            trash_files(list(fnames))
+            return list(fnames)
+        except Exception:
+            # Trash is preferred but must not block cleanup — fall through
+            # to direct deletion. Files already moved raise below and are
+            # skipped, so a partial trash is contained.
+            logger.exception(
+                "Moving audio files to trash failed — deleting directly")
+
+    removed = []
+    try:
+        media_dir = col.media.dir()
+    except Exception:
+        logger.exception(
+            "Could not resolve the media directory — orphaned audio "
+            "files were left in place")
+        return []
+    for fname in fnames:
+        try:
+            os.remove(os.path.join(media_dir, fname))
+            removed.append(fname)
+        except OSError:
+            logger.warning("Could not remove orphaned audio file %r", fname)
+    return removed
 
 
 def download_audio(jpn_id: str, col) -> "str | None":

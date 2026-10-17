@@ -371,6 +371,16 @@ class TestBatchResultAudioFields(unittest.TestCase):
         r1.audio_error_details.append("boom")
         self.assertEqual(len(r2.audio_error_details), 0)
 
+    def test_newly_added_media_defaults_empty(self):
+        result = BatchResult()
+        self.assertEqual(result.newly_added_media, set())
+
+    def test_newly_added_media_not_shared(self):
+        r1 = BatchResult()
+        r2 = BatchResult()
+        r1.newly_added_media.add("11111.mp3")
+        self.assertEqual(len(r2.newly_added_media), 0)
+
     def test_total_processed_excludes_audio_counters(self):
         result = BatchResult(
             updated=2, skipped_existing=1, skipped_no_match=1,
@@ -741,7 +751,141 @@ class TestProcessPendingAudio(unittest.TestCase):
         self.assertEqual(good_note.fields[0], "[sound:22222.mp3]")
         self.assertEqual(len(result.audio_error_details), 1)
         self.assertIn("11111", result.audio_error_details[0])
+        # The failed item's file was stored in col.media but never
+        # referenced — the compensating cleanup removed exactly that one.
+        # The applied file was untracked and must survive.
+        mock_af.unregister_audio_files.assert_called_once_with(
+            ["11111.mp3"], col)
+        self.assertEqual(result.newly_added_media, set())
 
+
+class TestOrphanedMediaCleanup(unittest.TestCase):
+    """Tests for the compensating cleanup: files the batch itself registered
+    in col.media but never referenced are removed again, while files that may
+    predate the batch are never touched."""
+
+    def _make_mock_note(self, fields_dict, field_order=None):
+        if field_order is None:
+            field_order = list(fields_dict.keys())
+        note = MagicMock()
+        note.fields = [fields_dict.get(name, "") for name in field_order]
+        note.note_type.return_value = {"flds": [{"name": name} for name in field_order]}
+        return note
+
+    @patch('src.core.batch_engine.audio_fetcher')
+    def test_register_tracks_files_stored_under_temp_basename(self, mock_af):
+        """A temp registration that kept its basename is provably batch-new
+        (the download only ran because col.media lacked that name), so it is
+        tracked for cleanup. Media-source names never are."""
+        from src.core.batch_engine import register_audio_media, AUDIO_RESOLVED
+        mock_af.register_audio_file.return_value = "11111.mp3"
+        result = BatchResult()
+
+        registered = register_audio_media([
+            (1, None, None, "Audio", "11111", AUDIO_RESOLVED,
+             ResolvedAudio("11111", None, None, "temp", "/tmp/x/11111.mp3")),
+            (2, None, None, "Audio", "22222", AUDIO_RESOLVED,
+             ResolvedAudio("22222", None, None, "media", "22222.mp3")),
+        ], result, MagicMock())
+
+        self.assertEqual(result.newly_added_media, {"11111.mp3"})
+        self.assertEqual(len(registered), 2)
+
+    @patch('src.core.batch_engine.audio_fetcher')
+    def test_register_never_tracks_renamed_or_reused_names(self, mock_af):
+        """add_file() returning a name other than the temp basename reused a
+        pre-existing same-content file (or renamed on a collision) — that
+        file may predate the batch and be referenced elsewhere, so it is
+        never tracked and can never be deleted by cleanup."""
+        from src.core.batch_engine import register_audio_media, AUDIO_RESOLVED
+        mock_af.register_audio_file.return_value = "other-name.mp3"
+        result = BatchResult()
+
+        register_audio_media([
+            (1, None, None, "Audio", "11111", AUDIO_RESOLVED,
+             ResolvedAudio("11111", None, None, "temp", "/tmp/x/11111.mp3")),
+        ], result, MagicMock())
+
+        self.assertEqual(result.newly_added_media, set())
+
+    @patch('src.core.batch_engine.audio_fetcher')
+    def test_apply_discards_names_it_referenced(self, mock_af):
+        """Every successfully applied filename leaves the cleanup set — a
+        clean run has nothing to remove."""
+        from src.core.batch_engine import apply_audio_fields
+        note = self._make_mock_note({"Audio": ""}, field_order=["Audio"])
+        col = MagicMock()
+        col.get_note.return_value = note
+        result = BatchResult()
+        result.newly_added_media = {"11111.mp3"}
+
+        apply_audio_fields(
+            [(1, "Audio", "11111", "11111.mp3", None, None, None, None)],
+            result, col)
+
+        self.assertEqual(result.newly_added_media, set())
+        self.assertEqual(result.audio_added, 1)
+
+    @patch('src.core.batch_engine.audio_fetcher')
+    def test_shared_fname_survives_when_the_other_note_fails(self, mock_af):
+        """Two notes can resolve to the same sentence, so one registered file
+        can back two pending items. Deleting it when one note update fails
+        would break the other note's [sound:] tag — the applied reference
+        keeps the file alive."""
+        from src.core.batch_engine import register_pending_audio, AUDIO_RESOLVED
+        mock_af.register_audio_file.return_value = "11111.mp3"
+
+        good_note = self._make_mock_note({"Audio": ""}, field_order=["Audio"])
+        col = MagicMock()
+
+        def get_note(nid):
+            if nid == 1:
+                raise KeyError("note not found")
+            return good_note
+        col.get_note.side_effect = get_note
+
+        result = BatchResult()
+        items = [
+            (1, None, None, "Audio", "11111", AUDIO_RESOLVED,
+             ResolvedAudio("11111", None, None, "temp", "/tmp/x/11111.mp3")),
+            (2, None, None, "Audio", "11111", AUDIO_RESOLVED,
+             ResolvedAudio("11111", None, None, "temp", "/tmp/x/11111.mp3")),
+        ]
+        register_pending_audio(items, result, col)
+
+        # Note 2 references the file, so no cleanup may happen.
+        mock_af.unregister_audio_files.assert_not_called()
+        self.assertEqual(result.newly_added_media, set())
+        self.assertEqual(result.audio_added, 1)
+        self.assertEqual(result.audio_errors, 1)
+        self.assertEqual(good_note.fields[0], "[sound:11111.mp3]")
+
+    @patch('src.core.batch_engine.audio_fetcher')
+    def test_catastrophic_apply_failure_removes_all_registered_files(self, mock_af):
+        """The UI's apply-op failure handler calls remove_orphaned_media()
+        directly: nothing was applied, so every tracked file is removed."""
+        from src.core.batch_engine import remove_orphaned_media
+        mock_af.unregister_audio_files.return_value = ["11111.mp3", "22222.mp3"]
+        result = BatchResult()
+        result.newly_added_media = {"22222.mp3", "11111.mp3"}
+        col = MagicMock()
+
+        removed = remove_orphaned_media(result, col)
+
+        self.assertEqual(removed, 2)
+        mock_af.unregister_audio_files.assert_called_once_with(
+            ["11111.mp3", "22222.mp3"], col)
+        self.assertEqual(result.newly_added_media, set())
+
+    @patch('src.core.batch_engine.audio_fetcher')
+    def test_remove_orphaned_media_is_noop_when_nothing_registered(self, mock_af):
+        """A clean run — or one where nothing was registered — must not touch
+        col.media at all."""
+        from src.core.batch_engine import remove_orphaned_media
+        result = BatchResult()
+
+        self.assertEqual(remove_orphaned_media(result, MagicMock()), 0)
+        mock_af.unregister_audio_files.assert_not_called()
 
 
 class TestWriteAudioErrorLog(unittest.TestCase):

@@ -107,6 +107,16 @@ class BatchResult:
       ``(jpn_id, jpn_text, trans_text)`` fallbacks (all with a recording in the
       index, none already selected or present on the note) to try when the
       primary sentence's audio is 403-restricted.
+    - newly_added_media (set[str]): Staging set of media filenames this batch
+      itself added to col.media — filled by register_audio_media() with names
+      stored under their own temp basename (provably absent before the batch,
+      since resolve_audio() only downloads what col.media.have() lacks).
+      apply_audio_fields() discards each name as its note update succeeds, so
+      once the apply phase is over the set holds exactly the orphaned files;
+      remove_orphaned_media() (main thread) drains it. Filenames that may
+      predate the batch — media-source resolutions, or names add_file()
+      returned renamed — are never listed here, so cleanup cannot delete
+      files the user already had.
     - audio_error_details (list[str]): One human-readable line per item counted in
       audio_errors, recorded wherever the counter is incremented. The download phase
       captures the reason on a background thread; write_audio_error_log() later
@@ -125,6 +135,7 @@ class BatchResult:
     audio_errors: int = 0
     audio_reselected: int = 0
     pending_audio: list = field(default_factory=list)
+    newly_added_media: set = field(default_factory=set)
     audio_error_details: list = field(default_factory=list)
     changes: object = None
 
@@ -261,6 +272,15 @@ def register_audio_media(items: list, result: BatchResult, col) -> list:
     - AUDIO_FETCH_ERROR: increments result.audio_errors.
     - Any unexpected exception: logs, increments audio_errors, continues.
 
+    A temp file stored under its own basename is recorded in
+    result.newly_added_media: that name is provably batch-new (the download
+    only happened because col.media.have() lacked it), so if the apply phase
+    later drops the item, remove_orphaned_media() can safely remove the file
+    again — media being outside undo, this is the only rollback there is.
+    Filenames that may predate the batch (media-source resolutions, or names
+    add_file() returned renamed — a reused same-content file, or a collision)
+    are never recorded and therefore never deleted.
+
     Returns:
     - A list of (note_id, audio_field, jpn_id, fname, jpn_field, trans_field,
       new_jpn_text, new_trans_text) 8-tuples for apply_audio_fields(). The last
@@ -280,6 +300,14 @@ def register_audio_media(items: list, result: BatchResult, col) -> list:
                     fname = resolved.payload
                 else:
                     fname = audio_fetcher.register_audio_file(resolved.payload, col)
+                    # Track the file for compensating cleanup. Only the temp
+                    # basename qualifies: the download ran because col.media
+                    # lacked that exact name, so add_file() storing it again
+                    # means no such file predated the batch. Any other
+                    # returned name means add_file() reused or renamed under
+                    # an existing file — never a deletion candidate.
+                    if fname == os.path.basename(resolved.payload):
+                        result.newly_added_media.add(fname)
                 registered.append(
                     (note_id, audio_field, resolved.jpn_id, fname,
                      jpn_field, trans_field,
@@ -308,7 +336,9 @@ def apply_audio_fields(registered: list, result: BatchResult, col,
     For each (note_id, audio_field, jpn_id, fname, jpn_field, trans_field,
     new_jpn_text, new_trans_text) from register_audio_media():
     - Writes [sound:fname] verbatim, calls col.update_note, increments
-      result.audio_added.
+      result.audio_added, and discards fname from result.newly_added_media
+      (the note now references the file, so a later failure must never
+      remove it — another note may share the same audio).
     - When new_jpn_text is not None (a 403 re-selection), first overwrites the
       pair's Japanese/Translation fields with the HTML-escaped replacement text,
       in the same update_note call so the swap is part of the audio undo entry,
@@ -316,7 +346,11 @@ def apply_audio_fields(registered: list, result: BatchResult, col,
     - On missing fields or any unexpected exception: logs, increments
       result.audio_errors, continues with the next item.
 
-    Clears result.pending_audio after processing.
+    Clears result.pending_audio after processing. Names still left in
+    result.newly_added_media at that point were registered but never
+    referenced — remove_orphaned_media() deletes them; that removal is a
+    media operation, so it deliberately does NOT happen here (this function
+    must stay collection-writes-only to remain background-safe).
 
     Returns:
     - The OpChanges from the final merge_undo_entries() when undo_name is set
@@ -370,6 +404,9 @@ def apply_audio_fields(registered: list, result: BatchResult, col,
             note.fields[audio_idx] = f"[sound:{fname}]"
             col.update_note(note)
             result.audio_added += 1
+            # Discard immediately (not in a post-loop pass) so the set is
+            # correct even if the loop were ever interrupted mid-way.
+            result.newly_added_media.discard(fname)
             if new_jpn_text is not None:
                 result.audio_reselected += 1
             applied += 1
@@ -397,19 +434,73 @@ def apply_audio_fields(registered: list, result: BatchResult, col,
     return changes
 
 
+def remove_orphaned_media(result: BatchResult, col) -> int:
+    """Cleanup phase: remove audio files the batch added but no note references.
+
+    PRECONDITION: Must be called from the main thread (it mutates
+    col.media — see audio_fetcher.unregister_audio_files).
+
+    Compensating cleanup for the register/apply split. Media files sit
+    outside Anki's undo system, so when apply_audio_fields() skips or fails
+    an item — or the apply operation fails before running at all — the file
+    register_audio_media() stored in col.media would otherwise be orphaned
+    in the user's profile forever (re-runs never retry it: the pair's text
+    fields were already written, so skip_existing considers it done).
+
+    Drains result.newly_added_media, which by this point holds exactly the
+    orphans: register_audio_media() listed only provably batch-new filenames,
+    and apply_audio_fields() discarded each one as its note update succeeded.
+    Files that existed before the batch are never in the set, so they can
+    never be deleted here.
+
+    Idempotent and safe to call from every exit path: an empty set (clean
+    run, or nothing was registered) is a no-op. Removal failures are
+    contained by unregister_audio_files(); only a warning is logged here.
+
+    Args:
+    - result: The BatchResult whose newly_added_media is drained.
+    - col: The Anki collection object.
+
+    Returns:
+    - The number of files removed.
+    """
+    if not result.newly_added_media:
+        return 0
+    if audio_fetcher is None:
+        logger.error(
+            "audio_fetcher module not available — cannot remove orphaned media")
+        result.newly_added_media.clear()
+        return 0
+    orphans = set(result.newly_added_media)
+    # Sorted for a deterministic call (media trash order, logs, tests).
+    removed = audio_fetcher.unregister_audio_files(sorted(orphans), col)
+    result.newly_added_media.clear()
+    logger.info("Removed %d orphaned audio file(s) from col.media", len(removed))
+    if len(removed) < len(orphans):
+        logger.warning(
+            "Could not remove %d orphaned audio file(s) — Anki's Check Media "
+            "can delete them later",
+            len(orphans) - len(removed),
+        )
+    return len(removed)
+
+
 def register_pending_audio(items: list, result: BatchResult, col) -> None:
     """Register phase: store fetched files in col.media and write [sound:] tags.
 
     PRECONDITION: Must be called from the main thread
     (col.media.add_file constraint).
 
-    Synchronous composition of register_audio_media() and apply_audio_fields()
-    without undo bracketing — kept for callers that don't run inside a
-    CollectionOp (batch_ui splits the phases itself to get undoable writes).
-    Outcome semantics are documented on the two halves.
+    Synchronous composition of register_audio_media(), apply_audio_fields()
+    and remove_orphaned_media() without undo bracketing — kept for callers
+    that don't run inside a CollectionOp (batch_ui splits the phases itself
+    to get undoable writes, and must call remove_orphaned_media() itself
+    from its main-thread callbacks). Outcome semantics are documented on the
+    three functions.
     """
     registered = register_audio_media(items, result, col)
     apply_audio_fields(registered, result, col)
+    remove_orphaned_media(result, col)
 
 
 def process_pending_audio(result: BatchResult, col) -> None:
